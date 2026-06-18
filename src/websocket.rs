@@ -384,6 +384,7 @@ fn handle_video<S: WeylusSender + Clone + 'static>(
                     warn!("Screen capture not initalized, can not send video frame!");
                     continue;
                 }
+                let capture_time = Instant::now();
                 let pixel_data = recorder.as_mut().unwrap().capture();
                 if let Err(err) = pixel_data {
                     warn!("Error capturing screen: {}", err);
@@ -432,7 +433,7 @@ fn handle_video<S: WeylusSender + Clone + 'static>(
                     };
                 }
                 let video_encoder = video_encoder.as_mut().unwrap();
-                video_encoder.encode(pixel_data);
+                video_encoder.encode(pixel_data, capture_time);
             }
             // stop thread once the channel is closed
             Err(RecvTimeoutError::Disconnected) => return,

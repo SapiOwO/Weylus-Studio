@@ -151,7 +151,7 @@ mod tests {
         };
         let mut encoder =
             video::VideoEncoder::new(width, height, width, height, |_| {}, opts).unwrap();
-        b.iter(|| encoder.encode(r.capture().unwrap()));
+        b.iter(|| encoder.encode(r.capture().unwrap(), std::time::Instant::now()));
     }
 
     #[cfg(target_os = "linux")]
@@ -186,7 +186,7 @@ mod tests {
         };
         let mut encoder =
             video::VideoEncoder::new(width, height, width, height, |_| {}, opts).unwrap();
-        b.iter(|| encoder.encode(r.capture().unwrap()));
+        b.iter(|| encoder.encode(r.capture().unwrap(), std::time::Instant::now()));
     }
 
     #[cfg(target_os = "linux")]
@@ -213,7 +213,7 @@ mod tests {
         const SIZE: usize = WIDTH * HEIGHT * 4;
         let mut i = 0;
         b.iter(|| {
-            encoder.encode(video::PixelProvider::BGR0(WIDTH, HEIGHT, &bufs[i % N]));
+            encoder.encode(video::PixelProvider::BGR0(WIDTH, HEIGHT, &bufs[i % N]), std::time::Instant::now());
             i += 1;
         });
     }
@@ -242,7 +242,7 @@ mod tests {
         const SIZE: usize = WIDTH * HEIGHT * 4;
         let mut i = 0;
         b.iter(|| {
-            encoder.encode(video::PixelProvider::BGR0(WIDTH, HEIGHT, &bufs[i % N]));
+            encoder.encode(video::PixelProvider::BGR0(WIDTH, HEIGHT, &bufs[i % N]), std::time::Instant::now());
             i += 1;
         });
     }
@@ -271,7 +271,7 @@ mod tests {
         const SIZE: usize = WIDTH * HEIGHT * 4;
         let mut i = 0;
         b.iter(|| {
-            encoder.encode(video::PixelProvider::BGR0(WIDTH, HEIGHT, &bufs[i % N]));
+            encoder.encode(video::PixelProvider::BGR0(WIDTH, HEIGHT, &bufs[i % N]), std::time::Instant::now());
             i += 1;
         });
     }

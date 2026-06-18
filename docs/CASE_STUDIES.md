@@ -18,12 +18,14 @@ This document compiles all case studies for Weylus Studio. Each chapter document
 
 | Chapter | Focus Area | Date | Key Finding | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Chapter 4** | Pressure Range (0-1024 vs 0-8191) | 2026-06-18 | Need to verify if Win32 Synthetic Pointer API accepts 0-8191 instead of 0-1024 | **Needs verification** |
-| **Chapter 5** | WebSocket Queue Buffer Size | 2026-06-18 | Evaluate if `channel(32)` is too small and drops events during fast strokes | **Performance investigation** |
+| **Chapter 4** | Pressure Range (0-1024 vs 0-8191) | 2026-06-18 | Win32 Synthetic Pointer API pressure compression; mapping/normalization gap | **Performance investigation** |
+| **Chapter 5** | WebSocket Queue Buffer Size | 2026-06-18 | Backpressure queue buffer; event drops during rapid stylus strokes | **Performance investigation** |
 | **Chapter 6** | Windows Native Build Environment Issues | 2026-06-18 | CRLF conversions, WSL bash hijacking, and missing NASM cause baseline build fails | **Resolved** |
 | **Chapter 7** | Build System Modularization: Dual-Backend Dispatcher | 2026-06-18 | Monolithic `build.rs` is a "shared execution surface" — Windows prebuilt changes leak into Linux/macOS pipelines | **Resolved** |
 | **Chapter 8** | Capability Layer Extraction: `common.rs` Semantic Separation | 2026-06-18 | `common.rs` was mixing build orchestration, capability detection, and environment assumptions — all three are different concern classes | **Resolved** |
 | **Chapter 9** | Flat Typed Build Capabilities: Abstraction Freeze | 2026-06-19 | The boolean capability system was evolving into an over-engineered config system; refactoring to flat, typed contracts freezes abstraction creep | **Resolved** |
+| **Chapter 10** | Frame Pacing & Timing Resolution | 2026-06-19 | Millisecond timing (`.as_millis()`) causing micro-stuttering under Windows DWM compositor | **Performance investigation** |
+| **Chapter 11** | Community Patches (PR #290 & #291) Integration | 2026-06-19 | HiDPI coordinate offsets and lack of reconnection UX | **Needs verification** |
 
 
 > Case studies are living documents. New chapters are added as bugs are investigated, root-caused, and resolved.
@@ -216,55 +218,55 @@ The compiler does not warn about `todo!()` in match arms. A production audit pas
 
 ---
 
-## Chapter 4: Investigation — Pressure Range Verification
-* **Investigated**: 2026-06-18
-* **Status**: Needs verification.
+## Chapter 4: Investigation — Pressure Range Verification (0-1024 vs 0-8191)
+* **Investigated**: 2026-06-19
+* **Status**: 🔍 **Performance investigation.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Stylus users drawing on apps that require high precision pressure levels (e.g., Photoshop, Krita).
+* **Who is affected**: Stylus users drawing on Windows drawing applications (like Photoshop, Krita, or Clip Studio Paint) who notice less smooth/coarse pressure gradients compared to Linux.
 
 #### WHAT
-* **What is the issue**: The current pressure translation formula is `pressure: (event.pressure * 1024f64) as u32`. However, some sources suggest the Synthetic Pointer API can accept a pressure range of up to `8191` (or different levels depending on Windows Pointer Device configuration). Raising it without confirmation might cause clipping or incorrect behavior, but leaving it too low might reduce precision.
+* **What is the issue**: The current pressure translation formula is `pressure: (event.pressure * 1024f64) as u32`. The browser client sends pressure values normalized between `0.0` and `1.0`. By multiplying it by `1024`, we are compressing the input data too aggressively in the Windows pipeline before injecting it. If the Win32 Synthetic Pointer API supports high-resolution pressure up to `8191` (the professional drawing tablet standard), this compression introduces a mapping/normalization gap.
 
 #### WHERE
-* **Where does it occur**: `src/input/autopilot_device_win.rs` line 114.
+* **Where does it occur**: `src/input/autopilot_device_win.rs`, lines 114 (for Pen) and 137 (for Touch).
 
 #### WHEN
-* **When is it triggered**: When drawing with a pen/stylus on the client tablet.
+* **When is it triggered**: During drawing operations on the tablet where pressure changes continuously.
 
 #### WHY
-* **Root Cause**: Lack of clear documentation or empirical testing regarding the exact max pressure bounds expected by `InjectSyntheticPointerInput` and how external Windows applications (like Photoshop/Krita) interpret these synthetic pressure values.
+* **Root Cause**: The choice of `1024` as the maximum pressure multiplier was a safe default assumption, but it leads to a loss of pressure fidelity. Because we are mapping the fine-grained `0.0-1.0` float values to a low integer range, subtle pressure variations get quantized out.
 
 #### HOW
-* **Proposed Action**: Instead of immediately updating the range, add a task to **verify the pressure range** in the ROADMAP and test it with real applications and Win32 Pointer API logs.
+* **Proposed Action**: Benchmark the pressure scale on Photoshop/Krita with different scaling multipliers (e.g. `8191` or `4095`) and verify whether the Windows Synthetic Pointer API accepts the higher range without clipping, improving the pressure gradient smoothness.
 
 ---
 
 ## Chapter 5: Investigation — WebSocket Queue Buffer Size
-* **Investigated**: 2026-06-18
-* **Status**: Performance investigation.
+* **Investigated**: 2026-06-19
+* **Status**: 🔍 **Performance investigation.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Users experiencing drawing lag or dropped stylus events when performing very fast strokes.
+* **Who is affected**: Stylus users drawing very fast strokes on Windows, experiencing input lag, jagged lines, or brief freezes.
 
 #### WHAT
-* **What is the issue**: The WebSocket event handler uses a channel size of 32 (`channel(32)`) to buffer incoming input events. If the tablet generates pressure/pointer events faster than the server can process them, the buffer may fill up, leading to dropped frames or input latency.
+* **What is the issue**: The WebSocket handler uses a fixed-size channel buffer of 32 (`channel(32)`) to queue inbound events. High-frequency stylus devices sample at 120Hz–240Hz, generating up to 240 events per second. If the server cannot process and inject these pointer events immediately, the queue overflows, causing dropped events or lag.
 
 #### WHERE
 * **Where does it occur**: `src/websocket.rs` or the websocket event dispatcher.
 
 #### WHEN
-* **When is it triggered**: During rapid/continuous drawing strokes or multitouch gesture operations.
+* **When is it triggered**: When drawing rapid, continuous strokes, or in complex multi-touch scenarios where multiple pointer paths send events concurrently.
 
 #### WHY
-* **Root Cause**: The queue size (32) is a design choice. While it keeps memory usage minimal, it might act as a bottleneck for high-frequency input streams (styluses typically sample at 120Hz-240Hz, generating up to 240 events per second).
+* **Root Cause**: This is a classic real-time backpressure queue problem. The buffer size of 32 is too small for high-frequency coordinate and pressure input streams. It assumes the consumption rate is always faster than the generation rate, which fails under heavy CPU load or thread scheduling delay.
 
 #### HOW
-* **Proposed Action**: Benchmark performance under stress testing. If events are dropped, test upgrading the queue size to 64, 128, or using an unbounded channel. This is categorized as a performance tuning task.
+* **Proposed Action**: Increase the WebSocket channel buffer size to 128 or 256, or implement an unbounded buffer with a custom drop strategy to ensure oldest events are dropped first if the queue overflows, prioritizing the most recent input coordinates.
 
 ---
 
@@ -643,4 +645,60 @@ The `BuildCapabilities` struct also provides an additional benefit: it is **self
 **Over-shaping an abstraction in build scripts is an anti-pattern.**
 
 A clean build system must be minimal, flat, and declarative. Strive to map platform facts to compile-time variables without introducing complex domain structures. Adding layers of nested types (e.g. separating capabilities vs options vs configs) inside a pre-compilation script creates a parallel architecture that raises the barrier to contribution. When typing build variables, keep the container struct flat and freeze its evolution depth.
+
+---
+
+## Chapter 10: Investigation — Frame Pacing & Timing Resolution
+* **Investigated**: 2026-06-19
+* **Status**: 🔍 **Performance investigation.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Windows users who notice micro-stuttering or minor jitter in the mirrored screen on the tablet, even when the network connection is strong and encoder latency is low.
+
+#### WHAT
+* **What is the issue**: The video encoding loop utilizes millisecond timing resolution (`.as_millis()`) to track packet display times and pacing intervals. Under Windows' Desktop Window Manager (DWM) compositor and thread scheduler, millisecond precision is often too coarse, leading to inconsistent frame intervals (e.g. frames being encoded slightly too early or late), producing visible jitter.
+
+#### WHERE
+* **Where does it occur**: `src/video.rs`, line 141 (and other timestamping blocks in the video pipeline).
+
+#### WHEN
+* **When is it triggered**: During screen mirroring while actively drawing or playing back animation, where frame delivery pacing is critical.
+
+#### WHY
+* **Root Cause**: The DWM compositor and the Windows thread scheduler operate on finer timing slices. A millisecond timer lacks the granularity to match the refresh cycle precisely, causing pacing desynchronization. Linux's scheduler handles millisecond thread sleeping differently, making this timing limitation less visible there.
+
+#### HOW
+* **Proposed Action**: Refactor the pacing and timestamping logic in `video.rs` to use microsecond resolution (`.as_micros()`). Adjust thread sleeping intervals to query high-precision timers on Windows to ensure consistent frame delivery.
+
+---
+
+## Chapter 11: Investigation — Community Patches (PR #290 & #291) Integration
+* **Investigated**: 2026-06-19
+* **Status**: Needs verification.
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**:
+  - Stylus users drawing on High-DPI screens under Windows whose inputs are offset from the visual cursor (PR #290).
+  - Tablet users who need to reconnect their session without reloading the web page, or who need to send virtual keyboard strokes (PR #291).
+
+#### WHAT
+* **What is the issue**: Weylus CE contains two high-demand community PRs that were never merged upstream:
+  1. **PR #290 (Click-to-reconnect + HiDPI coordinates)**: Fixes a known offset discrepancy where Windows display scaling shifts coordinates relative to the screen dimensions, and implements reconnect button.
+  2. **PR #291 (Virtual keyboard)**: Restores the ability to toggle an on-screen keyboard on the client side.
+
+#### WHERE
+* **Where does it occur**: The frontend TypeScript (`ts/lib.ts`) and HTML modules (`www/`), and the coordinate receiver on the Rust server (`src/websocket.rs`).
+
+#### WHEN
+* **When is it triggered**: When connecting a client tablet to a Windows host with display scale factor > 100%, or when the client tablet experiences connection drops.
+
+#### WHY
+* **Root Cause**: The original Weylus was written before Windows HiDPI coordinate scaling was fully verified, resulting in coordinates being mapped to physical pixels rather than logical pixels. The upstream repo ceased merging active community PRs due to merge conflicts and lack of developer testing.
+
+#### HOW
+* **Proposed Action**: Create clean feature branches for these patches. Resolve merge conflicts in `ts/lib.ts`, test coordinate translation on Windows machines with scaling (e.g. 125%, 150%), and integrate the frontend/backend support safely.
 

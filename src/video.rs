@@ -19,7 +19,7 @@ extern "C" {
     ) -> *mut c_void;
     fn open_video(handle: *mut c_void, err: *mut CError);
     fn destroy_video_encoder(handle: *mut c_void);
-    fn encode_video_frame(handle: *mut c_void, micros: c_int, err: *mut CError);
+    fn encode_video_frame(handle: *mut c_void, pts: i64, err: *mut CError);
 
     fn fill_rgb(ctx: *mut c_void, data: *const u8, err: *mut CError);
     fn fill_rgb0(ctx: *mut c_void, data: *const u8, err: *mut CError);
@@ -115,7 +115,7 @@ impl VideoEncoder {
         Ok(video_encoder)
     }
 
-    pub fn encode(&mut self, pixel_provider: PixelProvider) {
+    pub fn encode(&mut self, pixel_provider: PixelProvider, capture_time: Instant) {
         let mut err = CError::new();
         match pixel_provider {
             PixelProvider::BGR0(w, _, bgr0) => unsafe {
@@ -138,7 +138,7 @@ impl VideoEncoder {
         unsafe {
             encode_video_frame(
                 self.handle,
-                (Instant::now() - self.start_time).as_millis() as c_int,
+                (capture_time - self.start_time).as_micros() as i64,
                 &mut err,
             );
         }

@@ -26,7 +26,7 @@
 #include <va/va.h>
 #endif
 
-#define TIME_BASE ((AVRational){1, 1000})
+#define TIME_BASE ((AVRational){1, 1000000})
 
 typedef struct ScaleContext
 {
@@ -832,14 +832,14 @@ void destroy_video_encoder(VideoContext* ctx)
 	free(ctx);
 }
 
-void encode_video_frame(VideoContext* ctx, int millis, Error* err)
+void encode_video_frame(VideoContext* ctx, int64_t pts, Error* err)
 {
 	int ret;
 	AVFrame* frame = ctx->frame;
 	if (!frame)
 		ERROR(err, 1, "Frame not initialized!");
 
-	frame->pts = millis;
+	frame->pts = pts;
 
 	ret = avcodec_send_frame(ctx->c, frame);
 	if (ret < 0)

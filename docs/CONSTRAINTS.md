@@ -285,3 +285,37 @@ The following `#[cfg(target_os)]` usages in shared files are **explicitly approv
 
 > [!NOTE]
 > `build/common.rs` is **no longer on this list** as of 2026-06-18. It was refactored to contain zero `if target_os ==` branches via the `BuildCapabilities` capability layer extraction. See Section 1.5.
+
+---
+
+## Section 6: AI Assistant Execution Contract
+
+This section defines the mandatory contract for all AI coding assistants (Gemini, Claude, etc.) modifying the Weylus Studio codebase.
+
+> [!IMPORTANT]
+> **Read Before Modifying**: As an AI coding assistant, you MUST read and satisfy all rules in this contract before implementing changes.
+
+### 6.1 Hard Coding Rules (Non-Negotiable)
+
+*   **No OS Gating in Shared Modules**: You must NOT introduce `#[cfg(target_os)]` inside:
+    - [`src/protocol.rs`](../src/protocol.rs)
+    - [`src/video.rs`](../src/video.rs)
+    - [`src/input/device.rs`](../src/input/device.rs) (traits/interfaces only)
+    - [`src/capturable/mod.rs`](../src/capturable/mod.rs) (traits/interfaces only)
+    - [`build/common.rs`](../build/common.rs)
+*   **No OS-Specific Serialization**: Do not add OS-specific fields to JSON-serialized types or wire protocol structs.
+*   **No God Configurations**: `BuildCapabilities` is compile-time only and must NEVER be used to branch runtime logic in `src/`.
+
+### 6.2 Pre-Commit Verification Loop
+
+Before proposing or finalizing any changes, you must mentally run or simulate these checks:
+1.  `grep -rn "cfg(target_os" src/` — ensure zero occurrences in `src/protocol.rs`, `src/video.rs` or shared traits.
+2.  `grep -rn "windows" src/protocol.rs` — ensure no Windows-specific logic leaks into shared wire types.
+3.  `grep -rn "linux" src/protocol.rs` — same as above.
+
+### 6.3 Change Classification Requirement
+
+You must explicitly classify every proposed change in your implementation plan into:
+1.  **Shared-core change** (must be strictly OS-neutral)
+2.  **OS module change** (allowed to contain platform-specific target code)
+3.  **Build-system change** (must stay in the `build/` module tree only)
