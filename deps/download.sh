@@ -27,9 +27,10 @@ fi
 
 if [ "$TARGET_OS" == "windows" ] && [ "$HOST_OS" == "windows" ]; then
     cd ffmpeg
-    git apply ../command_limit.patch
+    # command_limit.patch is obsolete in FFmpeg 8.0 because RESPONSE_FILES handling is built-in
     git apply ../awk.patch
 fi
+
 
 
 

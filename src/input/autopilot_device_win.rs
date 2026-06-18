@@ -147,10 +147,8 @@ impl InputDevice for WindowsInput {
                     for (_i, info) in self.multitouch_map.iter().enumerate() {
                         pointer_type_info_vec.push(*info.1);
                     }
-                    let b: Box<[POINTER_TYPE_INFO]> = pointer_type_info_vec.into_boxed_slice();
-                    let m: *mut POINTER_TYPE_INFO = Box::into_raw(b) as _;
 
-                    InjectSyntheticPointerInput(self.touch_device_handle, m, len as u32);
+                    InjectSyntheticPointerInput(self.touch_device_handle, pointer_type_info_vec.as_mut_ptr(), len as u32);
 
                     match event.event_type {
                         PointerEventType::DOWN
@@ -209,7 +207,10 @@ impl InputDevice for WindowsInput {
                 }
                 unsafe { mouse_event(dw_flags, 0 as u32, 0 as u32, 0, 0) };
             }
-            PointerType::Unknown => todo!(),
+            PointerType::Unknown => {
+                warn!("Received pointer event with unknown pointer type, ignoring.");
+                return;
+            }
         }
     }
 
@@ -225,3 +226,17 @@ impl InputDevice for WindowsInput {
         InputDeviceType::WindowsInput
     }
 }
+
+impl Drop for WindowsInput {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.pointer_device_handle.is_null() {
+                DestroySyntheticPointerDevice(self.pointer_device_handle);
+            }
+            if !self.touch_device_handle.is_null() {
+                DestroySyntheticPointerDevice(self.touch_device_handle);
+            }
+        }
+    }
+}
+
