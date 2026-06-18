@@ -7,7 +7,7 @@ use std::sync::{mpsc, Arc};
 use std::thread::{spawn, JoinHandle};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::channel;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::capturable::{get_capturables, Capturable, Recorder};
 use crate::input::device::{InputDevice, InputDeviceType};
@@ -491,8 +491,8 @@ pub fn weylus_websocket_channel(
 
     let mut rx = FragmentCollectorRead::new(rx);
 
-    let (sender_inbound, receiver_inbound) = channel::<MessageInbound>(32);
-    let (sender_outbound, mut receiver_outbound) = channel::<WsMessage>(32);
+    let (sender_inbound, receiver_inbound) = channel::<MessageInbound>(128);
+    let (sender_outbound, mut receiver_outbound) = channel::<WsMessage>(128);
 
     {
         let sender_outbound = sender_outbound.clone();
@@ -551,11 +551,64 @@ pub fn weylus_websocket_channel(
                     }
                 }
                 WsMessage::Video(data) => {
-                    if let Err(err) = tx.write_frame(Frame::binary(data.into())).await {
+                    let mut latest_video = data;
+                    let mut pending_messages = Vec::new();
+                    let mut coalesced_count = 0;
+
+                    // Drain consecutive stale video frames from the queue, stopping at the first non-video message
+                    while let Ok(next_msg) = receiver_outbound.try_recv() {
+                        match next_msg {
+                            WsMessage::Video(new_data) => {
+                                latest_video = new_data;
+                                coalesced_count += 1;
+                            }
+                            other => {
+                                // Stop draining on any non-video message to preserve strict order
+                                pending_messages.push(other);
+                                break;
+                            }
+                        }
+                    }
+
+                    if coalesced_count > 0 {
+                        debug!("Coalesced {} stale video frame(s) from outbound queue", coalesced_count);
+                    }
+
+                    if let Err(err) = tx.write_frame(Frame::binary(latest_video.into())).await {
                         if let WebSocketError::ConnectionClosed = err {
                             break;
                         }
                         warn!("Failed to send video frame: {err}");
+                    }
+
+                    let mut connection_closed = false;
+                    for other_msg in pending_messages {
+                        match other_msg {
+                            WsMessage::Frame(frame) => {
+                                if let Err(err) = tx.write_frame(frame).await {
+                                    if let WebSocketError::ConnectionClosed = err {
+                                        connection_closed = true;
+                                        break;
+                                    }
+                                    warn!("Failed to send frame: {err}");
+                                }
+                            }
+                            WsMessage::Video(_) => unreachable!(),
+                            WsMessage::MessageOutbound(msg) => {
+                                let json_string = serde_json::to_string(&msg).unwrap();
+                                let data = json_string.as_bytes();
+                                if let Err(err) = tx.write_frame(Frame::text(data.into())).await {
+                                    if let WebSocketError::ConnectionClosed = err {
+                                        connection_closed = true;
+                                        break;
+                                    }
+                                    warn!("Failed to send outbound message: {err}");
+                                }
+                            }
+                        }
+                    }
+                    if connection_closed {
+                        break;
                     }
                 }
                 WsMessage::MessageOutbound(msg) => {

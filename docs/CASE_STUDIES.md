@@ -13,13 +13,13 @@ This document compiles all case studies for Weylus Studio. Each chapter document
 | **Chapter 1** | Memory Leak in Windows Touch Injection | 2026-06-18 | `Box::into_raw()` without `Box::from_raw()` leaks heap memory on every multitouch event | **Resolved** ✅ |
 | **Chapter 2** | Handle Leak: Synthetic Pointer Devices | 2026-06-18 | `CreateSyntheticPointerDevice` handles never released on shutdown | **Resolved** ✅ |
 | **Chapter 3** | Crash Risk: `PointerType::Unknown` Panic | 2026-06-18 | `todo!()` macro causes full application panic on unrecognized pointer type | **Resolved** ✅ |
+| **Chapter 5** | WebSocket Queue & Frame Coalescing | 2026-06-19 | Outbound video queues buffer video frames causing visual lag; fixed via priority coalescing | **Resolved** ✅ |
 
 ### Hypothesis / Candidate Bugs (Under Investigation)
 
 | Chapter | Focus Area | Date | Key Finding | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **Chapter 4** | Pressure Range (0-1024 vs 0-8191) | 2026-06-18 | Win32 Synthetic Pointer API pressure compression; mapping/normalization gap | **Performance investigation** |
-| **Chapter 5** | WebSocket Queue Buffer Size | 2026-06-18 | Backpressure queue buffer; event drops during rapid stylus strokes | **Performance investigation** |
 | **Chapter 6** | Windows Native Build Environment Issues | 2026-06-18 | CRLF conversions, WSL bash hijacking, and missing NASM cause baseline build fails | **Resolved** |
 | **Chapter 7** | Build System Modularization: Dual-Backend Dispatcher | 2026-06-18 | Monolithic `build.rs` is a "shared execution surface" — Windows prebuilt changes leak into Linux/macOS pipelines | **Resolved** |
 | **Chapter 8** | Capability Layer Extraction: `common.rs` Semantic Separation | 2026-06-18 | `common.rs` was mixing build orchestration, capability detection, and environment assumptions — all three are different concern classes | **Resolved** |
@@ -244,29 +244,47 @@ The compiler does not warn about `todo!()` in match arms. A production audit pas
 
 ---
 
-## Chapter 5: Investigation — WebSocket Queue Buffer Size
+## Chapter 5: WebSocket Queue Buffer Size & Frame Coalescing
 * **Investigated**: 2026-06-19
-* **Status**: 🔍 **Performance investigation.**
+* **Resolved**: 2026-06-19
+* **Status**: ✅ **Resolved.** Queue capacities tuned to 128 and order-preserving frame coalescing implemented.
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Stylus users drawing very fast strokes on Windows, experiencing input lag, jagged lines, or brief freezes.
+* **Who is affected**: Stylus users drawing rapid strokes or gestures, experiencing brush input lag, jagged lines, or visible visual delay.
 
 #### WHAT
-* **What is the issue**: The WebSocket handler uses a fixed-size channel buffer of 32 (`channel(32)`) to queue inbound events. High-frequency stylus devices sample at 120Hz–240Hz, generating up to 240 events per second. If the server cannot process and inject these pointer events immediately, the queue overflows, causing dropped events or lag.
+* **What is the issue**: 
+  1. The inbound channel for client input events had a fixed-size buffer of 32. For professional stylus devices sampling at 120Hz-240Hz, a brief server scheduling delay would fill the buffer, leading to backpressure and packet delivery delay on the WebSocket.
+  2. The outbound WebSocket channel buffered up to 32 video frames (`WsMessage::Video`). At 60fps, 32 frames represents ~533ms of visual latency. If the network was temporarily congested, the outbound writer thread sent stale video frames, causing a "sticky brush" lag feel.
 
 #### WHERE
-* **Where does it occur**: `src/websocket.rs` or the websocket event dispatcher.
+* **Where does it occur**: `src/websocket.rs` inside the `weylus_websocket_channel` function and its outbound frame dispatcher task.
 
 #### WHEN
-* **When is it triggered**: When drawing rapid, continuous strokes, or in complex multi-touch scenarios where multiple pointer paths send events concurrently.
+* **When is it triggered**: During rapid drawing bursts or gestures, and whenever network bandwidth fluctuated under load.
 
 #### WHY
-* **Root Cause**: This is a classic real-time backpressure queue problem. The buffer size of 32 is too small for high-frequency coordinate and pressure input streams. It assumes the consumption rate is always faster than the generation rate, which fails under heavy CPU load or thread scheduling delay.
+* **Root Cause**: The system lacked distinction between the lossy real-time requirements of interactive video and the strict ordering requirements of control messages. Treating video frames as reliable, sequential archival frames meant that stale frames were queued and sent in full, accumulating latency.
 
 #### HOW
-* **Proposed Action**: Increase the WebSocket channel buffer size to 128 or 256, or implement an unbounded buffer with a custom drop strategy to ensure oldest events are dropped first if the queue overflows, prioritizing the most recent input coordinates.
+* **Resolution**:
+  1. Increased the inbound queue capacity (`sender_inbound`) from 32 to 128 to absorb high-frequency stylus input bursts without blocking the WebSocket receiver loop.
+  2. Increased the outbound queue capacity (`sender_outbound`) from 32 to 128 to buffer transient text spikes.
+  3. Implemented a **Priority-Preserving / Coalesce Consecutive Only** strategy in the outbound tokio task. When a `WsMessage::Video` frame is processed:
+     - The task drains the outbound queue using `try_recv()` as long as subsequent messages are also `WsMessage::Video` frames.
+     - Older video frames are dropped, and only the latest video frame is sent.
+     - The draining loops **breaks** immediately if it encounters a non-video message (like `MessageOutbound::NewVideo` or `WsMessage::Frame`).
+     - This guarantees that critical decoder setup commands (`NewVideo`) are never reordered past video frames (which would cause client decoder crashes or state-machine mismatch), while still shedding stale video frames under network pressure.
+
+### 2. Engineering Lesson
+
+Real-time interactive systems must treat video and control streams with different delivery philosophies:
+- **Interactive Video**: Lossy. Obsolete video frames are useless; it is better to drop old frames than to delay new ones.
+- **Control Plane**: Reliable. Messages like decoder resets, layout dimensions, or config updates are state-dependent and must never be reordered or lost.
+
+A pure "drain completely" strategy for coalescing is dangerous because it reorders control messages past video frames. An **Order-Preserving (Coalesce Consecutive)** strategy is the correct model to balance low latency with state-machine correctness.
 
 ---
 
