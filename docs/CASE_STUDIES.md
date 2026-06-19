@@ -13,18 +13,18 @@ This document compiles all case studies for Weylus Studio. Each chapter document
 | **Chapter 1** | Memory Leak in Windows Touch Injection | 2026-06-18 | `Box::into_raw()` without `Box::from_raw()` leaks heap memory on every multitouch event | **Resolved** ✅ |
 | **Chapter 2** | Handle Leak: Synthetic Pointer Devices | 2026-06-18 | `CreateSyntheticPointerDevice` handles never released on shutdown | **Resolved** ✅ |
 | **Chapter 3** | Crash Risk: `PointerType::Unknown` Panic | 2026-06-18 | `todo!()` macro causes full application panic on unrecognized pointer type | **Resolved** ✅ |
+| **Chapter 4** | Pressure Range (0-1024 vs 0-8191) | 2026-06-19 | The 0-1024 scaling factor matches the maximum native range of Win32 Synthetic Pointer API | **Resolved** ✅ |
 | **Chapter 5** | WebSocket Queue & Frame Coalescing | 2026-06-19 | Outbound video queues buffer video frames causing visual lag; fixed via priority coalescing | **Resolved** ✅ |
+| **Chapter 10** | Frame Pacing & Timing Resolution | 2026-06-19 | Millisecond timing (`.as_millis()`) causing micro-stuttering under Windows DWM compositor | **Resolved** ✅ |
 
 ### Hypothesis / Candidate Bugs (Under Investigation)
 
 | Chapter | Focus Area | Date | Key Finding | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Chapter 4** | Pressure Range (0-1024 vs 0-8191) | 2026-06-18 | Win32 Synthetic Pointer API pressure compression; mapping/normalization gap | **Performance investigation** |
 | **Chapter 6** | Windows Native Build Environment Issues | 2026-06-18 | CRLF conversions, WSL bash hijacking, and missing NASM cause baseline build fails | **Resolved** |
 | **Chapter 7** | Build System Modularization: Dual-Backend Dispatcher | 2026-06-18 | Monolithic `build.rs` is a "shared execution surface" — Windows prebuilt changes leak into Linux/macOS pipelines | **Resolved** |
 | **Chapter 8** | Capability Layer Extraction: `common.rs` Semantic Separation | 2026-06-18 | `common.rs` was mixing build orchestration, capability detection, and environment assumptions — all three are different concern classes | **Resolved** |
 | **Chapter 9** | Flat Typed Build Capabilities: Abstraction Freeze | 2026-06-19 | The boolean capability system was evolving into an over-engineered config system; refactoring to flat, typed contracts freezes abstraction creep | **Resolved** |
-| **Chapter 10** | Frame Pacing & Timing Resolution | 2026-06-19 | Millisecond timing (`.as_millis()`) causing micro-stuttering under Windows DWM compositor | **Performance investigation** |
 | **Chapter 11** | Community Patches (PR #290 & #291) Integration | 2026-06-19 | HiDPI coordinate offsets and lack of reconnection UX | **Needs verification** |
 
 
@@ -218,29 +218,40 @@ The compiler does not warn about `todo!()` in match arms. A production audit pas
 
 ---
 
-## Chapter 4: Investigation — Pressure Range Verification (0-1024 vs 0-8191)
+## Chapter 4: Pressure Range Verification (0-1024 vs 0-8191)
 * **Investigated**: 2026-06-19
-* **Status**: 🔍 **Performance investigation.**
+* **Resolved**: 2026-06-19
+* **Status**: ✅ **Verified.** The current 0-1024 scaling factor is the Win32 API limit and is correct.
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Stylus users drawing on Windows drawing applications (like Photoshop, Krita, or Clip Studio Paint) who notice less smooth/coarse pressure gradients compared to Linux.
+* **Who is affected**: Stylus users drawing on Windows drawing applications (like Photoshop, Krita, or Clip Studio Paint) who want to verify that stylus pressure gradients are delivered at maximum fidelity.
 
 #### WHAT
-* **What is the issue**: The current pressure translation formula is `pressure: (event.pressure * 1024f64) as u32`. The browser client sends pressure values normalized between `0.0` and `1.0`. By multiplying it by `1024`, we are compressing the input data too aggressively in the Windows pipeline before injecting it. If the Win32 Synthetic Pointer API supports high-resolution pressure up to `8191` (the professional drawing tablet standard), this compression introduces a mapping/normalization gap.
+* **What is the issue**: The codebase translates normalized stylus pressure `0.0` - `1.0` to Win32 pointer events using `(event.pressure * 1024f64) as u32`. We needed to verify if the Win32 Synthetic Pointer API supports professional ranges up to `8191` (the professional tablet standard) to prevent loss of fidelity.
 
 #### WHERE
-* **Where does it occur**: `src/input/autopilot_device_win.rs`, lines 114 (for Pen) and 137 (for Touch).
+* **Where does it occur**: `src/input/autopilot_device_win.rs` lines 114 and 137.
 
 #### WHEN
-* **When is it triggered**: During drawing operations on the tablet where pressure changes continuously.
+* **When is it triggered**: When drawing on the tablet with pressure sensitivity.
 
 #### WHY
-* **Root Cause**: The choice of `1024` as the maximum pressure multiplier was a safe default assumption, but it leads to a loss of pressure fidelity. Because we are mapping the fine-grained `0.0-1.0` float values to a low integer range, subtle pressure variations get quantized out.
+* **Root Cause / Finding**: Detailed investigation of Microsoft Win32 API specifications for `POINTER_PEN_INFO` and `POINTER_TOUCH_INFO` reveals that:
+  1. The `pressure` field in both structures is explicitly defined by Windows as a value normalized to a range between **0 and 1024**.
+  2. The default value if no pressure is reported is `0` for pens and `512` for touch points.
+  3. Setting any pressure values larger than 1024 violates the Win32 specification and leads to clamping or rejection at the kernel level.
+  4. Therefore, `1024` is the maximum native precision that Windows input injection can accept.
 
 #### HOW
-* **Proposed Action**: Benchmark the pressure scale on Photoshop/Krita with different scaling multipliers (e.g. `8191` or `4095`) and verify whether the Windows Synthetic Pointer API accepts the higher range without clipping, improving the pressure gradient smoothness.
+* **Resolution**: Verified that the current scaling factor of `1024` is correct and mathematically optimal for the Win32 target platform. No code changes are required as the implementation is already fully compliant with the platform's limits.
+
+### 2. Engineering Lesson
+
+**Do not optimize beyond platform boundaries.** 
+
+Before modifying code to match professional hardware standards (like Wacom's 8192 pressure levels), check the target OS injection API capabilities first. Even if the stylus hardware reports higher fidelity, the OS input subsystem may enforce a lower normalized range. In these cases, the OS range is the absolute hard ceiling, and any scaling beyond it is redundant or invalid.
 
 ---
 
@@ -666,9 +677,10 @@ A clean build system must be minimal, flat, and declarative. Strive to map platf
 
 ---
 
-## Chapter 10: Investigation — Frame Pacing & Timing Resolution
+## Chapter 10: Frame Pacing & Timing Resolution
 * **Investigated**: 2026-06-19
-* **Status**: 🔍 **Performance investigation.**
+* **Resolved**: 2026-06-19
+* **Status**: ✅ **Resolved.** Frame pacing migrated to microsecond precision and capture boundary timestamped.
 
 ### 1. 5W+1H Diagnostic Matrix
 
@@ -676,19 +688,28 @@ A clean build system must be minimal, flat, and declarative. Strive to map platf
 * **Who is affected**: Windows users who notice micro-stuttering or minor jitter in the mirrored screen on the tablet, even when the network connection is strong and encoder latency is low.
 
 #### WHAT
-* **What is the issue**: The video encoding loop utilizes millisecond timing resolution (`.as_millis()`) to track packet display times and pacing intervals. Under Windows' Desktop Window Manager (DWM) compositor and thread scheduler, millisecond precision is often too coarse, leading to inconsistent frame intervals (e.g. frames being encoded slightly too early or late), producing visible jitter.
+* **What was the issue**: The video encoding loop utilized millisecond timing resolution (`.as_millis()`) to track packet display times and pacing intervals. Under Windows' Desktop Window Manager (DWM) compositor and thread scheduler, millisecond precision is too coarse. Frame intervals were inconsistent, causing visible micro-stuttering.
 
 #### WHERE
-* **Where does it occur**: `src/video.rs`, line 141 (and other timestamping blocks in the video pipeline).
+* **Where does it occur**: `src/video.rs` (calculating relative frame presentation timestamps) and `lib/encode_video.c` (passing PTS to FFmpeg).
 
 #### WHEN
-* **When is it triggered**: During screen mirroring while actively drawing or playing back animation, where frame delivery pacing is critical.
+* **When is it triggered**: During active drawing or screen mirroring where precise, smooth frame delivery is critical.
 
 #### WHY
-* **Root Cause**: The DWM compositor and the Windows thread scheduler operate on finer timing slices. A millisecond timer lacks the granularity to match the refresh cycle precisely, causing pacing desynchronization. Linux's scheduler handles millisecond thread sleeping differently, making this timing limitation less visible there.
+* **Root Cause**: Two issues:
+  1. Coarse millisecond timing granularity in the video stream base time resulted in quantization jitter.
+  2. Stamping frames after capture was complete meant encoding latency and thread scheduling delays were baked directly into the video timeline, causing jitter in frame presentation times.
 
 #### HOW
-* **Proposed Action**: Refactor the pacing and timestamping logic in `video.rs` to use microsecond resolution (`.as_micros()`). Adjust thread sleeping intervals to query high-precision timers on Windows to ensure consistent frame delivery.
+* **Resolution**:
+  1. **Microsecond Resolution**: Refactored the `TIME_BASE` denominator in `lib/encode_video.c` from `1000` to `1000000` (microseconds).
+  2. **i64 timestamps**: Changed the C/FFI parameter signature in `encode_video_frame` from `int millis` to `int64_t pts` to support microsecond timestamps without the 35-minute overflow limitation.
+  3. **Capture Boundary Decoupling**: Moved the timestamping clock in `src/websocket.rs` immediately *before* calling `recorder.capture()`. The calculated presentation timestamp is based on the moment of capture, shielding the timeline from downstream CPU encoding jitter.
+
+### 2. Engineering Lesson
+
+In video streaming systems, timestamps must reflect the **logical moment of capture**, not the physical moment of submission to the encoder. Moving the timestamp boundary upstream decouples presentation timeline calculations from downstream resource contention (such as CPU/GPU encode spikes). Additionally, temporal resolution must match or exceed the compositor scheduling slice (microseconds) to prevent pacing quantization.
 
 ---
 

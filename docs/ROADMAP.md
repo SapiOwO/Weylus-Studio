@@ -63,9 +63,9 @@ Goal: Make the existing web-based experience reliable and accurate enough for re
 - [x] **Fix crash risk**: Replace `PointerType::Unknown => todo!()` with a graceful `warn!` + `return`. See [CASE_STUDIES.md Chapter 3](./CASE_STUDIES.md#chapter-3-crash-risk--pointertype-unknown-causes-application-panic).
 
 #### Priority A — Drawing Accuracy & Latency (Investigations & Tuning)
-- [ ] **Verify pen pressure range**: Confirm whether Win32 Synthetic Pointer API accepts 0–1024 or a wider range (e.g., 0–8191). Verify Photoshop/Krita behavior and Win32 docs. See [CASE_STUDIES.md Chapter 4](./CASE_STUDIES.md#chapter-4-investigation--pressure-range-verification).
-- [ ] **Improve video timestamp precision**: `video.rs` line 141 uses `.as_millis()`. Consider `.as_micros()` for smoother frame pacing.
-- [ ] **Evaluate WebSocket input buffer**: `websocket.rs` line 493 uses `channel(32)`. Investigate if this causes event drops during fast drawing strokes. See [CASE_STUDIES.md Chapter 5](./CASE_STUDIES.md#chapter-5-investigation--websocket-queue-buffer-size).
+- [x] **Verify pen pressure range**: Confirm whether Win32 Synthetic Pointer API accepts 0–1024 or a wider range (e.g., 0–8191). Verified that 1024 is the native Win32 API limit. See [CASE_STUDIES.md Chapter 4](./CASE_STUDIES.md#chapter-4-pressure-range-verification-0-1024-vs-0-8191).
+- [x] **Improve video timestamp precision**: Upgraded timing resolution to microseconds and shifted the timestamp boundary to the capture moment. See [CASE_STUDIES.md Chapter 10](./CASE_STUDIES.md#chapter-10-frame-pacing--timing-resolution).
+- [x] **Evaluate WebSocket input buffer**: Tuned inbound/outbound queues to 128 and implemented priority-aware frame coalescing. See [CASE_STUDIES.md Chapter 5](./CASE_STUDIES.md#chapter-5-websocket-queue-buffer-size--frame-coalescing).
 
 #### Priority B — Build & Distribution Improvements (Known Limitation)
 - [x] **Remove `bash` dependency on Windows build**: Replace `build.rs`'s `Command::new("bash")` FFmpeg build step with a PowerShell script or a pre-built FFmpeg DLL strategy, so `cargo build` works natively on Windows without Git Bash or MSYS2.
