@@ -61,7 +61,7 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 - [x] **Decoupled Shell Execution in Build Script**: Integrated `shell` and `shell_flag` in `BuildCapabilities` for platform-neutral compiler invocation. See [[CONSTRAINTS]].
 - [x] **Recursive Asset Rebuild Tracking**: Configured Cargo to watch all `www/src` files recursively, preventing stale assets.
 - [x] **Safety Config Fallback**: Added default configuration fallback when writing virtual key profiles dynamically.
-- [ ] **mDNS Discovery & USB Auto ADB reverse**: Automatically reverse tcp ports (`adb reverse tcp:1701 tcp:1701`) when Android is connected via USB, and broadcast the host via mDNS.
+- [x] **mDNS Discovery & USB Auto ADB reverse**: Automatically reverse tcp ports (`adb reverse tcp:1701 tcp:1701`) when Android is connected via USB, and broadcast the host via mDNS. See [[CASE_STUDIES#Chapter 14 mDNS Discovery & USB Auto ADB Reverse]].
 
 ### Phase 3 — Android Native Client (Kotlin + Jetpack Compose) (Future 🚀)
 * **Goal**: Replace the web client completely with a native Kotlin Android application to bypass browser rendering bottlenecks and target **120 FPS** with ultra-low latency. See [[CASE_STUDIES#Chapter 12 Evolving to Modular Multi-Device Platform]].

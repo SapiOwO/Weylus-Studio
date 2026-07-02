@@ -21,6 +21,7 @@ This unified document compiles all case studies for Weylus Studio. Each chapter 
 | **Chapter 11** | Build Pipeline & Virtual Keyboard Serialization | 2026-06-21 | Streamlined node compile triggers, dropped string protocols, implemented virtual_keys.rs | **Resolved** ✅ |
 | **Chapter 12** | Evolving to Modular Multi-Device Platform | 2026-06-21 | Shifting from web-based mirroring to native Kotlin client & USB 120 FPS target | **Vision Defined** 🚀 |
 | **Chapter 13** | Build Decoupling & Configuration Fallback Safety | 2026-07-03 | Platform-neutral shell injection in `BuildCapabilities` and safe fallback struct generation | **Resolved** ✅ |
+| **Chapter 14** | mDNS Discovery & USB Auto ADB Reverse | 2026-07-03 | Broadcast host via local mDNS and periodically establish adb reverse port mappings | **Resolved** ✅ |
 
 ---
 
@@ -476,3 +477,40 @@ $$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} +
         }
     });
     ```
+
+---
+
+## Chapter 14: mDNS Discovery & USB Auto ADB Reverse
+* **Investigated**: 2026-07-03
+* **Resolved**: 2026-07-03
+* **Status**: ✅ **Resolved.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Tablet clients connecting to the host PC via local WiFi (requiring auto-discovery) or direct USB cable connection.
+
+#### WHAT
+* **What is the issue**:
+  - **No Auto-Discovery**: Clients had to manually discover and type the host PC's dynamic local IP address and port into their browser or client app.
+  - **No Automated USB Tunneling**: To achieve the low-latency target (120 FPS), users had to manually run terminal scripts (`adb reverse tcp:1701 tcp:1701`) every time the device was re-connected.
+
+#### WHERE
+* **Where does it occur**: Server startup and daemon loops in `src/weylus.rs`, with dependencies declared in `Cargo.toml`.
+
+#### WHEN
+* **When is it triggered**: Activated at server startup (`Weylus::start()`), running continuously in a 5-second background loop for ADB detection, and cleaned up at shutdown (`Weylus::stop()`).
+
+#### WHY
+* **Why does it happen (Root Cause)**:
+  - Local network discovery protocols (mDNS/DNS-SD) were missing from the host PC server.
+  - Connection lifecycle events for USB devices were not monitored or automated on the host.
+
+#### HOW
+* **How it was resolved**:
+  - **mDNS Auto-Discovery**: Integrated `mdns-sd` (version `^0.11`) to broadcast the `_weylus._tcp.local.` service automatically on `config.web_port`.
+  - **USB Auto ADB Reverse**: Spawned a background thread in `weylus.rs` that periodically checks for connected Android devices via `adb devices`. If detected, it automatically executes:
+    ```bash
+    adb reverse tcp:<port> tcp:<port>
+    ```
+    This bridges the connection over the USB cable instantly.
