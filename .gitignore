@@ -14,3 +14,4 @@ c_helper/Cargo.lock
 /www/node_modules/
 /www/package-lock.json
 /.agents/
+/graphify-out/
