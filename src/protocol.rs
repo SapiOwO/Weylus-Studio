@@ -12,6 +12,18 @@ pub struct ClientConfiguration {
     pub frame_rate: f64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VirtualKey {
+    pub label: String,
+    pub key_code: u16,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VirtualKeyProfile {
+    pub name: String,
+    pub keys: Vec<VirtualKey>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum MessageInbound {
     PointerEvent(PointerEvent),
@@ -23,6 +35,8 @@ pub enum MessageInbound {
     ResumeVideo,
     RestartVideo,
     ChooseCustomInputAreas,
+    RequestVirtualKeysProfiles,
+    SetVirtualKeysProfiles { profiles: Vec<VirtualKeyProfile> },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -33,6 +47,7 @@ pub enum MessageOutbound {
     CustomInputAreas(CustomInputAreas),
     ConfigError(String),
     Error(String),
+    VirtualKeysProfiles { profiles: Vec<VirtualKeyProfile> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]

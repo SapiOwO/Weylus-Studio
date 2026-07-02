@@ -2,9 +2,9 @@
 
 This document is the primary entry point for building, running, and maintaining Weylus Studio on Windows. For architecture deep-dives and case studies, see the linked documents below.
 
-*   **Architecture Reference**: How the input injection, screen capture, and video pipeline work → [ARCHITECTURE.md](./ARCHITECTURE.md)
-*   **Case Studies**: Root-cause analysis of bugs found and resolved → [CASE_STUDIES.md](./CASE_STUDIES.md)
-*   **Roadmap**: Phase plan from Windows stability to Flutter native app → [ROADMAP.md](./ROADMAP.md)
+*   **Architecture Reference**: How the input injection, screen capture, and video pipeline work → [[ARCHITECTURE]]
+*   **Case Studies**: Root-cause analysis of bugs found and resolved → [[CASE_STUDIES]]
+*   **Roadmap**: Phase plan from Windows stability to native app → [[ROADMAP]]
 
 ---
 
@@ -99,27 +99,15 @@ The GUI will launch. Set an access code, click **Start**, then open the URL show
    adb reverse tcp:1701 tcp:1701
    adb reverse tcp:9001 tcp:9001
    ```
-   Then connect from the tablet to `http://127.0.0.1:1701`.
+   Now navigate to `http://localhost:1701` on your tablet's browser.
 
 ---
 
-## 🖊️ 4. Enabling Stylus & Pen Pressure (Windows)
+## ⚠️ 4. Known Limitations & Notes
 
-Weylus Studio uses `CreateSyntheticPointerDevice` and `InjectSyntheticPointerInput` — the modern Windows 10 pointer injection API — which means:
+### Pressure Sensitivity
+*   Must be supported by the tablet hardware (e.g., Samsung Galaxy Tab with S-Pen, iPad with Apple Pencil).
+*   Chrome on Android fully supports pen pressure and tilt. Firefox may require custom settings depending on version.
 
-- **Pen pressure**, **tilt X/Y**, and **rotation/twist** are transmitted from the tablet browser and injected as a synthetic pen device in Windows.
-- Apps supporting Windows Ink (Krita, Clip Studio Paint, Photoshop) should detect pressure automatically.
-- If an app does not respond to pressure, verify that **Windows Ink** support is enabled in that app's settings.
-
----
-
-## ⚠️ 5. Known Limitations & Non-Goals
-
-| Limitation | Status | Notes |
-| :--- | :--- | :--- |
-| **Build requires bash on Windows** | Open / Priority B | FFmpeg build script uses `bash`. Workaround: Git Bash or MSYS2. |
-| **No per-window capture on Windows** | Open / Priority C | Only full-monitor capture via DXGI. Per-window is Linux-only. |
-| **Web browser required (no native app)** | Open / Phase 3 | Flutter native client planned. Browser limits stylus sampling to ~60 Hz. |
-| **No encryption by default** | By design | Use on trusted local networks only. TLS proxy via `hitch` documented in main README. |
-| **Virtual keyboard not supported** | By design | Physical Bluetooth keyboards connected to the tablet are supported. |
-| **FFmpeg shipped as DLL on Windows** | Open / Priority B | Unlike Linux (static), Windows requires FFmpeg DLLs alongside the binary. |
+### Windows Pointer Type Issues
+*   Win32 input injection maps pen events with synthetic device handles. Software like Photoshop/Krita must support Windows Ink (Pointer API) to register pen pressure correctly. If you experience issues, toggle Windows Ink in your program's settings.

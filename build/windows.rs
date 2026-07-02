@@ -17,11 +17,12 @@ pub fn build() {
         has_videotoolbox: false,     // VideoToolbox is macOS-only
         has_mediafoundation: true,   // MediaFoundation is Windows-only
         has_libnpp: enable_libnpp,   // Opt-in via env var
-        typescript: build_common::TypeScriptCompilerSource::NpxShell,
+        shell: "cmd",
+        shell_flag: "/c",
     };
 
     // Compile shared resources using capability declaration
-    build_common::compile_typescript(&caps);
+    build_common::build_web_client(&caps);
     build_common::compile_c_helpers(&caps, &dist_dir);
 
     // Link FFmpeg & x264 libs from prebuilt_windows

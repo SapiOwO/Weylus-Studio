@@ -146,6 +146,9 @@ pub struct Config {
     #[arg(long, help = "Print shell completions for given shell.")]
     #[serde(skip)]
     pub completions: Option<clap_complete::Shell>,
+
+    #[arg(skip)]
+    pub virtual_keys_profiles: Option<String>,
 }
 
 pub fn read_config() -> Option<Config> {

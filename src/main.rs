@@ -28,6 +28,7 @@ mod video;
 mod web;
 mod websocket;
 mod weylus;
+mod virtual_keys;
 
 fn main() {
     let (sender, receiver) = mpsc::sync_channel::<String>(100);

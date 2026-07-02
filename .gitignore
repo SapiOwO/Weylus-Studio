@@ -11,3 +11,6 @@ c_helper/Cargo.lock
 *.js.map
 *.tar.gz
 /deps/prebuilt_windows
+/www/node_modules/
+/www/package-lock.json
+/.agents/

@@ -2,7 +2,7 @@
 
 This document defines **enforceable structural rules** that prevent the Weylus Studio codebase from drifting into a "cross-platform in theory, Windows in practice" state. These constraints protect the long-term health of both the Windows-optimized primary path and the community's Linux/macOS foundation.
 
-> **Why this document exists**: After modularizing the build system into a dual-backend dispatcher (see [CASE_STUDIES.md Chapter 7](./CASE_STUDIES.md#chapter-7-build-system-modularization--dual-backend-dispatcher-architecture)), the project reached a structurally sound state. But **structure alone does not prevent drift** — only enforced constraints do. This document defines those constraints.
+> **Why this document exists**: After modularizing the build system into a dual-backend dispatcher (see [[CASE_STUDIES#Chapter 7 Dual-Backend Dispatcher Architecture]]), the project reached a structurally sound state. But **structure alone does not prevent drift** — only enforced constraints do. This document defines those constraints.
 
 ---
 
@@ -26,8 +26,8 @@ The following files and abstractions form the **"neutral core"** of Weylus Studi
 
 | File | Abstraction | Neutrality Rule |
 | :--- | :--- | :--- |
-| [`src/protocol.rs`](../src/protocol.rs) | `PointerEvent`, `WheelEvent`, `KeyboardEvent`, `MessageInbound`, `MessageOutbound` | **STRICT** — zero `cfg(target_os)` allowed. The wire protocol must serialize identically on all platforms. |
-| [`src/protocol.rs`](../src/protocol.rs) | `WeylusSender`, `WeylusReceiver` traits | **STRICT** — network transport traits must be platform-agnostic. |
+| `src/protocol.rs` | `PointerEvent`, `WheelEvent`, `KeyboardEvent`, `MessageInbound`, `MessageOutbound` | **STRICT** — zero `cfg(target_os)` allowed. The wire protocol must serialize identically on all platforms. |
+| `src/protocol.rs` | `WeylusSender`, `WeylusReceiver` traits | **STRICT** — network transport traits must be platform-agnostic. |
 
 > [!CAUTION]
 > **Current violation**: `ClientConfiguration` (protocol.rs line 5–6) contains `#[cfg(target_os = "linux")] pub uinput_support: bool`. This makes the **JSON wire format OS-dependent** — a client talking to a Linux server sees a different JSON shape than one talking to a Windows server. This must be resolved by making the field unconditional with a default value, or by moving it to a separate Linux-specific configuration extension.
@@ -36,7 +36,7 @@ The following files and abstractions form the **"neutral core"** of Weylus Studi
 
 | File | Abstraction | Neutrality Rule |
 | :--- | :--- | :--- |
-| [`src/video.rs`](../src/video.rs) | `PixelProvider` enum, `VideoEncoder`, `EncoderOptions` | **STRICT** — zero `cfg(target_os)` allowed. Currently fully clean ✅. |
+| `src/video.rs` | `PixelProvider` enum, `VideoEncoder`, `EncoderOptions` | **STRICT** — zero `cfg(target_os)` allowed. Currently fully clean ✅. |
 
 `video.rs` is the **model of correct abstraction** in this codebase. Hardware encoder selection (`try_vaapi`, `try_nvenc`, `try_videotoolbox`, `try_mediafoundation`) is expressed as boolean flags, not OS-conditional compilation. The caller (in `config.rs` / `websocket.rs`) gates which flags are available per OS — the video pipeline itself remains unaware of the OS.
 
@@ -46,8 +46,8 @@ The following files and abstractions form the **"neutral core"** of Weylus Studi
 
 | File | Abstraction | Neutrality Rule |
 | :--- | :--- | :--- |
-| [`src/input/device.rs`](../src/input/device.rs) | `InputDevice` trait | **STRICT** — the trait methods (`send_wheel_event`, `send_pointer_event`, `send_keyboard_event`, `set_capturable`, `device_type`) must remain OS-neutral. |
-| [`src/input/device.rs`](../src/input/device.rs) | `InputDeviceType` enum | **RELAXED** — OS-conditional variants are acceptable (e.g., `WindowsInput`) as long as they use `#[cfg]` gating. |
+| `src/input/device.rs` | `InputDevice` trait | **STRICT** — the trait methods (`send_wheel_event`, `send_pointer_event`, `send_keyboard_event`, `set_capturable`, `device_type`) must remain OS-neutral. |
+| `src/input/device.rs` | `InputDeviceType` enum | **RELAXED** — OS-conditional variants are acceptable (e.g., `WindowsInput`) as long as they use `#[cfg]` gating. |
 
 > [!WARNING]
 > **Current inconsistency**: `InputDeviceType::WindowsInput` is `#[cfg(target_os = "windows")]` gated, but `InputDeviceType::UInputDevice` is **not** gated despite being Linux-only. This asymmetry should be resolved — either gate all OS-specific variants, or un-gate all of them.
@@ -56,9 +56,9 @@ The following files and abstractions form the **"neutral core"** of Weylus Studi
 
 | File | Abstraction | Neutrality Rule |
 | :--- | :--- | :--- |
-| [`src/capturable/mod.rs`](../src/capturable/mod.rs) | `Capturable` trait, `Recorder` trait, `BoxCloneCapturable` | **STRICT** — trait definitions must remain OS-neutral. |
-| [`src/capturable/mod.rs`](../src/capturable/mod.rs) | `Geometry` enum | **VIOLATED** — see below. |
-| [`src/capturable/mod.rs`](../src/capturable/mod.rs) | `get_capturables()` function | **VIOLATED** — see below. |
+| `src/capturable/mod.rs` | `Capturable` trait, `Recorder` trait, `BoxCloneCapturable` | **STRICT** — trait definitions must remain OS-neutral. |
+| `src/capturable/mod.rs` | `Geometry` enum | **VIOLATED** — see below. |
+| `src/capturable/mod.rs` | `get_capturables()` function | **VIOLATED** — see below. |
 
 > [!CAUTION]
 > **Current violations**:
@@ -69,10 +69,10 @@ The following files and abstractions form the **"neutral core"** of Weylus Studi
 
 | File | Abstraction | Neutrality Rule |
 | :--- | :--- | :--- |
-| [`build/common.rs`](../build/common.rs) | `compile_typescript()`, `compile_c_helpers()` | **STRICT** — zero `if target_os ==` branches. The module receives a `BuildCapabilities` struct from each OS module and acts on it. |
-| [`build/common.rs`](../build/common.rs) | `BuildCapabilities` struct | **CONTRACT** — the struct is the only interface between OS modules and shared build helpers. All capability decisions are owned by the OS modules. |
+| `build/common.rs` | `build_web_client()`, `compile_c_helpers()` | **STRICT** — zero `if target_os ==` branches. The module receives a `BuildCapabilities` struct from each OS module and acts on it. |
+| `build/common.rs` | `BuildCapabilities` struct | **CONTRACT** — the struct is the only interface between OS modules and shared build helpers. All capability decisions are owned by the OS modules. |
 
-**Current state**: ✅ `common.rs` has zero `if target_os` branches as of 2026-06-18. The `BuildCapabilities` struct is declared here, but populated entirely by each OS module:
+**Current state**: ✅ `common.rs` has zero `if target_os` branches. The `BuildCapabilities` struct is declared here, but populated entirely by each OS module:
 
 ```rust
 // build/windows.rs — Windows OWNS its capability decisions:
@@ -82,9 +82,10 @@ let caps = BuildCapabilities {
     has_videotoolbox: false,
     has_mediafoundation: true,
     has_libnpp: enable_libnpp,
-    typescript: build_common::TypeScriptCompilerSource::NpxShell,
+    shell: "cmd",
+    shell_flag: "/c",
 };
-build_common::compile_typescript(&caps);
+build_common::build_web_client(&caps);
 build_common::compile_c_helpers(&caps, &dist_dir);
 ```
 
@@ -112,8 +113,8 @@ This section documents every location where OS-specific logic currently exists i
 | :--- | :--- | :--- | :--- | :--- |
 | M1 | `src/capturable/mod.rs` | 66–69 | `get_capturables()` has OS-conditional parameters | Watch for new parameters added only for one OS. Consider moving to a builder/config struct pattern. |
 | M2 | `src/input/device.rs` | 8–9 | `WindowsInput` gated but `UInputDevice` not gated | Resolve inconsistency — either gate all OS-specific variants or none. |
-| M3 | `build/common.rs` | 7–13 | Windows uses `cmd /c npx` while Unix uses `tsc` directly | If Linux/macOS also need `npx`, update both branches symmetrically. |
-| M4 | `src/gui.rs` | ~350 | Windows has no QR code feature (`pnet_datalink` excluded) | Known feature gap. Document in ROADMAP if planning to fix. |
+| M3 | `build/common.rs` | 7–13 | Windows uses `cmd /c npx` while Unix uses `tsc` directly | Handled via `caps.shell` capability injection. |
+| M4 | `src/gui.rs` | ~350 | Windows has no QR code feature (`pnet_datalink` excluded) | Known feature gap. Document in [[ROADMAP]] if planning to fix. |
 | M5 | `Cargo.toml` | 52–53 | `pnet_datalink` excluded from Windows via `cfg(not(windows))` | Negative gate — unusual. If Windows needs IP discovery, add a Windows-native alternative. |
 
 ### 🟢 LOW Risk — Properly Gated
@@ -125,7 +126,7 @@ These are correctly implemented and serve as **examples of good practice**:
 - `src/video.rs` — Zero OS-specific code. **Model file.**
 - `src/config.rs` — Encoder option fields gated at config level
 - `src/websocket.rs` — Windows input device initialization properly gated
-- `build/common.rs` lines 46–57 — C `#define` flags for hardware encoders (justified, symmetric)
+- `build/common.rs` — C `#define` flags for hardware encoders (justified, symmetric)
 - `Cargo.toml` — Platform-conditional dependencies properly sectioned
 
 ---
@@ -166,17 +167,17 @@ These rules are the **hard constraints** that must be enforced on every commit. 
 
 ### Rule 5: Feature Parity Awareness 🔒
 
-> **If a feature is removed or degraded on one OS, it must be documented in ROADMAP.md with a justification and a "restore plan" (or explicit "will not fix" decision).**
+> **If a feature is removed or degraded on one OS, it must be documented in [[ROADMAP]] with a justification and a "restore plan" (or explicit "will not fix" decision).**
 
 - Current known gap: QR code / IP display on Windows (missing `pnet_datalink`).
 - Future gaps must be tracked, not silently accumulated.
 
 ### Rule 6: Documentation Must Reflect Runtime Truth 🔒
 
-> **Every status field in CASE_STUDIES.md and ROADMAP.md must match the actual code state. If a fix is applied, the doc must be updated in the same commit.**
+> **Every status field in [[CASE_STUDIES]] and [[ROADMAP]] must match the actual code state. If a fix is applied, the doc must be updated in the same commit.**
 
-- **Rationale**: This project already experienced documentation drift where CASE_STUDIES.md Chapters 1–3 claimed fixes were "pending" when they were already applied. This was caught by a cross-document audit.
-- **Enforcement**: When marking a ROADMAP item as `[x]`, also update the corresponding CASE_STUDIES chapter status.
+- **Rationale**: This project already experienced documentation drift where [[CASE_STUDIES]] Chapters 1–3 claimed fixes were "pending" when they were already applied. This was caught by a cross-document audit.
+- **Enforcement**: When marking a [[ROADMAP]] item as `[x]`, also update the corresponding [[CASE_STUDIES]] chapter status.
 
 ### Rule 7: BuildCapabilities Isolation 🔒
 
@@ -210,7 +211,7 @@ Phase 1 (CURRENT) ────────────────────�
 │ ✅ Clean modular dispatcher                         │
 │ ✅ Windows optimized (prebuilt path)                │
 │ ✅ Linux/macOS retain original pipelines            │
-│ ⚠️ common.rs has 5 OS-conditional branches          │
+│ ✅ common.rs decoupled via BuildCapabilities        │
 │ ⚠️ 2 HIGH-risk coupling points in shared types      │
 ───────────────────────────────────────────────────────
 
@@ -265,8 +266,8 @@ Run these checks every 3 months or before any major release:
 - [ ] `grep -rn 'cfg(target_os' src/input/device.rs` — count should not increase
 - [ ] `grep -rn 'cfg(target_os' src/capturable/mod.rs` — count should not increase
 - [ ] `grep -rn 'cfg(target_os' build/common.rs` — count should not increase
-- [ ] Verify all CASE_STUDIES.md status fields match actual code state
-- [ ] Verify all ROADMAP.md `[x]` items are actually completed in code
+- [ ] Verify all [[CASE_STUDIES]] status fields match actual code state
+- [ ] Verify all [[ROADMAP]] `[x]` items are actually completed in code
 
 ---
 
@@ -284,7 +285,7 @@ The following `#[cfg(target_os)]` usages in shared files are **explicitly approv
 | `src/gui.rs` | UI label and checkbox gating | GUI reflects available features per OS |
 
 > [!NOTE]
-> `build/common.rs` is **no longer on this list** as of 2026-06-18. It was refactored to contain zero `if target_os ==` branches via the `BuildCapabilities` capability layer extraction. See Section 1.5.
+> `build/common.rs` is **no longer on this list**. It was refactored to contain zero `if target_os ==` branches via the `BuildCapabilities` capability layer extraction. See Section 1.5.
 
 ---
 
@@ -298,11 +299,11 @@ This section defines the mandatory contract for all AI coding assistants (Gemini
 ### 6.1 Hard Coding Rules (Non-Negotiable)
 
 *   **No OS Gating in Shared Modules**: You must NOT introduce `#[cfg(target_os)]` inside:
-    - [`src/protocol.rs`](../src/protocol.rs)
-    - [`src/video.rs`](../src/video.rs)
-    - [`src/input/device.rs`](../src/input/device.rs) (traits/interfaces only)
-    - [`src/capturable/mod.rs`](../src/capturable/mod.rs) (traits/interfaces only)
-    - [`build/common.rs`](../build/common.rs)
+    - `src/protocol.rs`
+    - `src/video.rs`
+    - `src/input/device.rs` (traits/interfaces only)
+    - `src/capturable/mod.rs` (traits/interfaces only)
+    - `build/common.rs`
 *   **No OS-Specific Serialization**: Do not add OS-specific fields to JSON-serialized types or wire protocol structs.
 *   **No God Configurations**: `BuildCapabilities` is compile-time only and must NEVER be used to branch runtime logic in `src/`.
 
@@ -319,3 +320,21 @@ You must explicitly classify every proposed change in your implementation plan i
 1.  **Shared-core change** (must be strictly OS-neutral)
 2.  **OS module change** (allowed to contain platform-specific target code)
 3.  **Build-system change** (must stay in the `build/` module tree only)
+
+---
+
+## Section 7: Modular Platform & Extensibility Constraints
+
+This section outlines rules ensuring the long-term evolution of Weylus Studio into a multi-device streaming and input platform.
+
+### 7.1 Separation of Concerns (Loose Coupling)
+- **Streaming Pipeline**: Gated by capability flags and timing parameters. Keep encoder-specific parameters out of the connection or coordinate handling layers.
+- **Input Injection**: Decoupled from the websocket handler using clean traits (`src/input/device.rs`). New injection modes (e.g. game controller, virtual keyboard) must implement isolated interfaces.
+- **Frontend Architecture**: The Preact + SASS + esbuild workspace inside `www/` is the single source of truth for UI. Do not attempt to merge backend changes into frontend directories or vice versa.
+
+### 7.2 Invariant Preservation Checklist
+Every modification must verify that we do not regress on our key stability invariants:
+1. **Memory Invariant**: Direct borrows on `Vec` structures (`.as_mut_ptr()`) instead of raw `Box::into_raw` allocations for Win32 input.
+2. **Handle Invariant**: Windows synthetic pointer handles are released via the `Drop` implementation on `WindowsInput`.
+3. **Pacing Invariant**: Video timestamps are computed in microsecond resolution, calculated at the capture boundary.
+4. **Coalescing Invariant**: Network queue video frames are coalesced consecutively, stopping immediately at any control message to prevent out-of-order execution.

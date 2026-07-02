@@ -90,7 +90,7 @@ graph TD
     capturable --> dxgi["DXGI / captrs (Windows)"]
 ```
 
-### Data Flow: Tablet Stylus → Windows Pointer Injection
+### Data Flow: Stylus → Windows Pointer Injection
 
 ```mermaid
 graph TD
@@ -166,7 +166,7 @@ Weylus Studio uses the **Synthetic Pointer Input API** introduced in Windows 10 
 - Captured frames are exposed as `PixelProvider::BGR0S` (BGR with stride) to the encoding pipeline.
 
 ### FFmpeg H.264 Encoding
-- The Rust `VideoEncoder` struct (`video.rs`) is a thin safe wrapper over a C context created in `lib/encode_video.c`.
+- The Rust `VideoEncoder` struct (`video.rs`) is a safe wrapper over a C context created in `lib/encode_video.c`.
 - Frames are pushed as raw pixel buffers; the C layer handles YUV conversion via `libswscale` and H.264 encoding via `libx264`.
 - Encoded packets are returned to Rust via a function pointer callback (`write_video_packet`), avoiding any heap copies.
 
@@ -183,16 +183,15 @@ Hardware acceleration is disabled by default due to quality variability across h
 
 ## Section 5: AI Assistant Collaboration Rules
 
-Any AI assistant collaborating on this codebase must adhere to these constraints:
+Any AI assistant collaborating on this codebase must adhere to the rules in [[CONSTRAINTS]] and respect the milestones in [[ROADMAP]].
 
 ### Strict Prohibitions
 1. **No modifications to the Windows API call structure** without verifying against official Microsoft Win32 documentation. The pointer injection calls are safety-critical.
-2. **No removal of `unsafe` blocks without replacement** — every `unsafe` block in `autopilot_device_win.rs` exists because it crosses the Rust/Win32 boundary and cannot be made safe without an abstraction layer.
-3. **No changes to `protocol.rs` field names** without simultaneously updating `ts/lib.ts` and the Android native client's serializable payload models — the JSON field names are shared between the Rust server and the client and must remain in sync.
-4. **No additional `Box::into_raw()` usage** without a corresponding `Box::from_raw()` or an explicit documented justification. Raw ownership transfer is a known source of memory leaks.
-
+2. **No removal of `unsafe` blocks without replacement** — every `unsafe` block in `autopilot_device_win.rs` exists because it crosses the Rust/Win32 boundary.
+3. **No changes to `protocol.rs` field names** without simultaneously updating `ts/lib.ts` and the Android native client's serializable payload models.
+4. **No additional `Box::into_raw()` usage** without a corresponding `Box::from_raw()` or an explicit documented justification.
 
 ### Core Standards
 * **Platform-conditional code**: Use `#[cfg(target_os = "windows")]` for all Windows-specific logic. Never put Windows-only code in a non-conditional block.
-* **Error handling**: Use `warn!()` from the `tracing` crate for recoverable errors. Reserve `panic!()` and `todo!()` only for genuine unimplemented states that will crash — and document plans to remove them.
-* **Memory safety in unsafe blocks**: Any `Box::into_raw()` must be paired with `Box::from_raw()` in the same function scope, or replaced with a borrow (`as_mut_ptr()`) when the callee does not take ownership.
+* **Error handling**: Use `warn!()` from the `tracing` crate for recoverable errors.
+* **Memory safety in unsafe blocks**: Any `Box::into_raw()` must be paired with `Box::from_raw()` in the same function scope, or replaced with a borrow (`as_mut_ptr()`) when the callee does not take ownership. See [[CASE_STUDIES#Chapter 1 Memory Leak in Windows Touch Injection]] for details.

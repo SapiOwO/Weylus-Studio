@@ -1,22 +1,5 @@
 use std::path::Path;
-use std::process::Command;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeScriptCompilerSource {
-    GlobalTsc,
-    NpxShell,
-}
-
-/// Capability declaration struct — owned by each OS module, consumed by common helpers.
-///
-/// This is the "capability layer" separating OS identity from feature detection.
-/// `common.rs` functions MUST NOT contain any `if target_os == ...` branches.
-/// Instead, each OS module constructs a `BuildCapabilities` struct and passes it here.
-///
-/// Rules:
-/// - If you find yourself adding `if target_os ==` to a function in this file, STOP.
-///   Move the decision into the calling OS module and express it as a capability here.
-/// - This struct is the single contract between OS modules and shared build logic.
 pub struct BuildCapabilities {
     /// Whether the build target supports NVIDIA NVENC hardware encoding.
     /// True on Windows and Linux (if NVENC headers are available), false on macOS.
@@ -33,48 +16,70 @@ pub struct BuildCapabilities {
     /// Whether the user has opted in to libnpp CUDA-accelerated processing.
     /// Controlled by the `I_AM_BUILDING_THIS_AT_HOME_AND_WANT_LIBNPP` env var.
     pub has_libnpp: bool,
-    /// How the TypeScript compiler is invoked on the build platform.
-    pub typescript: TypeScriptCompilerSource,
+    /// The shell executable (e.g. "cmd" on Windows, or "" on POSIX)
+    pub shell: &'static str,
+    /// The shell evaluation flag (e.g. "/c" on Windows, or "" on POSIX)
+    pub shell_flag: &'static str,
 }
 
-pub fn compile_typescript(caps: &BuildCapabilities) {
-    println!("cargo:rerun-if-changed=ts/lib.ts");
+pub fn build_web_client(caps: &BuildCapabilities) {
+    use std::process::Command;
 
-    let mut tsc_command = match caps.typescript {
-        TypeScriptCompilerSource::NpxShell => {
-            // Windows: tsc is not directly executable — must go through cmd and npx
-            let mut cmd = Command::new("cmd");
-            cmd.args(&["/c", "npx -y -p typescript tsc"]);
-            cmd
+    let www_dir = std::path::Path::new("www");
+    let node_modules = www_dir.join("node_modules");
+
+    // Track config files
+    println!("cargo:rerun-if-changed=www/package.json");
+    println!("cargo:rerun-if-changed=www/tsconfig.json");
+    if www_dir.join("pnpm-lock.yaml").exists() {
+        println!("cargo:rerun-if-changed=www/pnpm-lock.yaml");
+    } else if www_dir.join("package-lock.json").exists() {
+        println!("cargo:rerun-if-changed=www/package-lock.json");
+    }
+
+    // Recursively track www/src directory contents to rebuild static files when code changes
+    if let Ok(entries) = std::fs::read_dir("www/src") {
+        for entry in entries.flatten() {
+            if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                println!("cargo:rerun-if-changed={}", entry.path().display());
+            }
         }
-        TypeScriptCompilerSource::GlobalTsc => {
-            // Linux / macOS: tsc expected to be available via PATH
-            Command::new("tsc")
-        }
+    }
+
+    if !node_modules.exists() {
+        panic!(
+            "\n\n\
+             www/node_modules missing.\n\
+             Run:\n\
+             cd www\n\
+             npm install\n\n"
+        );
+    }
+
+    // Determine binary extension based on shell configuration
+    let is_windows = !caps.shell.is_empty() && caps.shell.contains("cmd");
+    let pnpm_bin = if is_windows { "pnpm.cmd" } else { "pnpm" };
+    let npm_bin = if is_windows { "npm.cmd" } else { "npm" };
+
+    let is_pnpm = www_dir.join("pnpm-lock.yaml").exists() 
+        && Command::new(pnpm_bin).arg("--version").status().map_or(false, |s| s.success());
+    let base_cmd = if is_pnpm { pnpm_bin } else { npm_bin };
+    
+    let status_build = if !caps.shell.is_empty() {
+        Command::new(caps.shell)
+            .args(&[caps.shell_flag, &format!("{} run build", base_cmd)])
+            .current_dir(www_dir)
+            .status()
+    } else {
+        Command::new(base_cmd)
+            .args(&["run", "build"])
+            .current_dir(www_dir)
+            .status()
     };
 
-    let js_needs_update = || -> Result<bool, Box<dyn std::error::Error>> {
-        Ok(Path::new("ts/lib.ts").metadata()?.modified()?
-            > Path::new("www/static/lib.js").metadata()?.modified()?)
-    }()
-    .unwrap_or(true);
-
-    if js_needs_update {
-        match tsc_command.status() {
-            Err(err) => {
-                println!("cargo:warning=Failed to call tsc: {}", err);
-                std::process::exit(1);
-            }
-            Ok(status) => {
-                if !status.success() {
-                    match status.code() {
-                        Some(code) => println!("cargo:warning=tsc failed with exitcode: {}", code),
-                        None => println!("cargo:warning=tsc terminated by signal."),
-                    };
-                    std::process::exit(2);
-                }
-            }
-        }
+    match status_build {
+        Ok(status) if status.success() => {},
+        _ => panic!("Failed to run build pipeline for Reference Client inside www/"),
     }
 }
 

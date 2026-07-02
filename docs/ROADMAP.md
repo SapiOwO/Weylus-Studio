@@ -1,6 +1,6 @@
-# Weylus Studio — Roadmap, Phase Plan & Changelog Journal
+# Weylus Studio — Unified Roadmap, Phase Plan & Changelog Journal
 
-This document outlines the engineering phase plan for evolving Weylus Studio from a stable Windows drawing tool to a full-featured Android native drawing tablet experience (Kotlin + Jetpack Compose). It also serves as a living changelog journal for tracking decisions over time.
+This document outlines the engineering phase plan for evolving Weylus Studio from a stable Windows drawing tool to a modular multi-device platform. It serves as a living changelog and unified tracking plan for all completed and future milestones.
 
 ---
 
@@ -10,153 +10,82 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 | :--- | :--- | :--- | :--- |
 | **Section 1** | Pillars of Engineering Integrity | 2026-06-18 | Active |
 | **Section 2** | Historical Change Log Journal | 2026-06-18 | Ongoing |
-| **Section 3** | Phase Plan: Windows → Flutter Native | 2026-06-18 | Phased planning |
+| **Section 3** | Evolving Unified Phase Plan | 2026-07-03 | Active Plan |
 | **Section 4** | Rust Learning Milestones | 2026-06-18 | In progress |
 
 ---
 
 ## Section 1: Pillars of Engineering Integrity
 
-The Weylus Studio engineering approach is governed by four core pillars, reflecting the project owner's background in consumer-grade hardware optimization:
-
-1. **Latency-First for Drawing**: Every architectural decision must minimize the round-trip time from stylus contact on the tablet to pixel registration in the drawing app on the PC. This is non-negotiable — a drawing tool that lags feels broken.
-
-2. **Memory Safety Without Sacrifice**: Rust's ownership system is the primary defense against memory corruption and leaks. `unsafe` blocks must be minimal, documented, and reviewed. Every `Box::into_raw()` must have a paired `Box::from_raw()` or be replaced with a safe borrow.
-
-3. **Consumer Hardware Realism**: The project runs on a personal Windows PC and an Android tablet. No cloud dependencies, no hardware encoders assumed. Software x264 must always be the reliable fallback. Optional hardware acceleration (NVENC, MediaFoundation) is a performance bonus, not a baseline requirement.
-
-4. **Progressive Enhancement Architecture**: The browser-based frontend is the current baseline. The Flutter native client is the target. Every protocol decision (`protocol.rs`) must be designed so that a native client can replace the browser without breaking the Rust server.
+1. **Latency-First for Drawing**: Every architectural decision must minimize the round-trip time from stylus contact on the tablet to pixel registration in the drawing app on the PC.
+2. **Memory Safety Without Sacrifice**: Rust's ownership system is the primary defense against memory corruption and leaks. Paired cleanup drops must be implemented for all synthetic OS pointer handles.
+3. **Consumer Hardware Realism**: The baseline compiler supports consumer-grade setups with static libraries. Software H.264 remains the robust fallback, with optional NVENC/MediaFoundation acceleration.
+4. **Progressive Enhancement Architecture**: All network protocol formats must be platform-neutral (`src/protocol.rs`), allowing the browser client to be progressively replaced by a native Kotlin application without breaking core server logic.
 
 ---
 
 ## Section 2: Historical Change Log Journal
 
 ### June 18, 2026 — Initial Documentation & Bug Investigation Pass
-* **Project forked and renamed**: Weylus Community Edition forked as `Weylus-Studio` under the Synthover Framework. License remains AGPL-3.0-or-later. Original copyright notices preserved.
-* **Initial codebase audit**: Full read of all Rust source files (`src/`), build scripts (`build.rs`, `deps/`), TypeScript frontend (`ts/lib.ts`), and Windows-specific modules (`capturable/win_ctx.rs`, `input/autopilot_device_win.rs`).
-* **Three candidate bugs identified and documented**:
-    1. Memory leak: `Box::into_raw()` in touch injection without deallocation (Chapter 1, CASE_STUDIES.md).
-    2. Handle leak: `CreateSyntheticPointerDevice` handles never released (Chapter 2, CASE_STUDIES.md).
-    3. Crash risk: `PointerType::Unknown => todo!()` panic in production code path (Chapter 3, CASE_STUDIES.md).
-* **Docs folder initialized**: `QUICKSTART.md`, `ARCHITECTURE.md`, `CASE_STUDIES.md`, `ROADMAP.md` created.
-* **License clarified**: AGPL-3.0 allows republication under a new project name without using GitHub's Fork feature, provided the license is preserved, copyright notices are retained, and source code of modifications is made available upon distribution.
+* **Project Forked**: Forked as `Weylus-Studio` to evolve the drawing platform.
+* **Initial Audit**: Identified memory leaks in multitouch pointer allocation, kernel handle leaks on device drop, and crash risk panics on unknown events.
 
-### June 19, 2026 — Windows Input Stability Fixes, Decoupled Dispatcher Build System, and Flat Typed Capability Freeze
-* **Fixed Confirmed Bugs (Priority S)**: Completed safe pointer touches without box leak, implemented `Drop` destructor for windows pointer/touch synthetic handles, and handled unknown pointer events gracefully without crash panic.
-* **Established Dual-Backend Architecture**: Switched Windows target to utilize a precompiled cache of locally-built static libraries under `deps/prebuilt_windows`, bypassing compilation dependencies entirely. Linux/macOS targets continue using their POSIX pipelines.
-* **Decoupled Build Script Modules**: Refactored `build.rs` into a platform module dispatcher that delegates compiling and linking to isolated submodules: `build/windows.rs`, `build/linux.rs`, `build/macos.rs`, and `build/common.rs`.
-* **TypeScript NPX Compilation & Type Safety**: Updated compilation script to execute TypeScript natively using `npx` dynamic execution, resolving strict type checks via loose settings in `tsconfig.json`.
-* **Evolved Capabilities to Flat Typed Contracts**: Replaced boolean `typescript_via_npx` flag with a typed enum `TypeScriptCompilerSource` in `common.rs` to make toolchain execution deterministic and type-safe. Kept the `BuildCapabilities` struct flat to avoid over-engineering.
-* **Enforced Boundaries**: Added Rules 7, 8, and 9 to `CONSTRAINTS.md` to freeze build-system abstraction levels and prevent compile-time structs from leaking into runtime `src/` modules.
+### June 19, 2026 — Input Stability, Decoupled Dispatcher, and Flat Typed Capability Freeze
+* **Fixed Confirmed Bugs**: Completed touch injection borrows, implemented `Drop` traits for Win32 synthetic handles, and replaced panic-bound `todo!()` macros with warnings.
+* **Decoupled Build Script Modules**: Refactored monolithic `build.rs` into platform dispatcher submodules (`build/windows.rs`, `build/linux.rs`, `build/macos.rs`, and `build/common.rs`).
+* **Established Capabilities Contract**: Extracted compiler checks to a flat `BuildCapabilities` struct with typed enums.
+
+### June 21, 2026 — Documentation Standardization & Visi Platform Multi-Device
+* **5W+1H Standardization**: Unified all case studies into a comprehensive document using the 5W+1H template. See [[CASE_STUDIES]].
+* **Defined Native 120 FPS Vision**: Detailed the transition from web server rendering to a native Kotlin Android application utilizing USB tethering to break performance boundaries.
+
+### July 3, 2026 — Build Decoupling & Configuration Fallback
+* **Refactored common.rs**: Removed all platform detection `cfg!(target_os)` checks from the TS compiler by introducing `shell` and `shell_flag` in `BuildCapabilities`.
+* **Recursive Cargo Tracking**: Configured Cargo to track all source files inside `www/src` recursively, preventing stale client assets.
+* **Safety Configuration Fallback**: Fixed a silent failure where virtual key profiles could not be saved if the initial `weylus.toml` config file was missing.
 
 ---
 
-## Section 3: Phase Plan
+## Section 3: Evolving Unified Phase Plan
 
-### Phase 1 — Windows Stability & Drawing Quality (Current)
+### Phase 1 — Windows Stability & Drawing Quality (Completed ✅)
+* **Goal**: Stabilize memory allocations, ensure safe kernel handle drops, scale stylus pressure mappings accurately up to 1024, and resolve micro-stuttering using microsecond timestamping at capture boundaries. See [[CASE_STUDIES#Chapter 1 Memory Leak in Windows Touch Injection]], [[CASE_STUDIES#Chapter 2 Handle Leak: Synthetic Pointer Devices]], and [[CASE_STUDIES#Chapter 10 Frame Pacing & Timing Resolution]].
 
-Goal: Make the existing web-based experience reliable and accurate enough for real drawing sessions on Windows.
+### Phase 2 — Plug-and-Play USB, mDNS & Community PRs (Current 🚀)
+* **Goal**: Implement click-to-reconnect and HiDPI coordinate scaling alignments (PR #290), integrate virtual keyboard bindings (PR #291), and configure network discovery protocols.
+- [x] **Clean Executable Reference Client Build**: Created `build_web_client` in `build/common.rs` to invoke npm/pnpm directly.
+- [x] **Removed Auto-Install**: Enforced explicit panic errors if dependency modules are missing, protecting compilation determinism.
+- [x] **Pointer Enter/Leave Events**: Added logical `Enter` and `Leave` states to `PointerEventType` in `src/protocol.rs`.
+- [x] **Type-Safe Virtual Keyboard Protocol**: Created struct `VirtualKey` and `VirtualKeyProfile` in `src/protocol.rs`, bypassing loose string serialization.
+- [x] **Modular Domain Extraction**: Extracted configuration read/write for virtual keys profiles out of the websocket net transport layer into `src/virtual_keys.rs`.
+- [x] **Decoupled Shell Execution in Build Script**: Integrated `shell` and `shell_flag` in `BuildCapabilities` for platform-neutral compiler invocation. See [[CONSTRAINTS]].
+- [x] **Recursive Asset Rebuild Tracking**: Configured Cargo to watch all `www/src` files recursively, preventing stale assets.
+- [x] **Safety Config Fallback**: Added default configuration fallback when writing virtual key profiles dynamically.
+- [ ] **mDNS Discovery & USB Auto ADB reverse**: Automatically reverse tcp ports (`adb reverse tcp:1701 tcp:1701`) when Android is connected via USB, and broadcast the host via mDNS.
 
-#### Priority S — Crash & Leak Prevention (Confirmed Bugs)
-- [x] **Fix memory leak** in touch injection (`autopilot_device_win.rs`): Replace `Box::into_raw()` with `Vec::as_mut_ptr()`. See [CASE_STUDIES.md Chapter 1](./CASE_STUDIES.md#chapter-1-memory-leak-in-windows-touch-injection).
-- [x] **Fix handle leak**: Implement `Drop` for `WindowsInput` to call `DestroySyntheticPointerDevice`. See [CASE_STUDIES.md Chapter 2](./CASE_STUDIES.md#chapter-2-handle-leak--synthetic-pointer-devices-never-released).
-- [x] **Fix crash risk**: Replace `PointerType::Unknown => todo!()` with a graceful `warn!` + `return`. See [CASE_STUDIES.md Chapter 3](./CASE_STUDIES.md#chapter-3-crash-risk--pointertype-unknown-causes-application-panic).
+### Phase 3 — Android Native Client (Kotlin + Jetpack Compose) (Future 🚀)
+* **Goal**: Replace the web client completely with a native Kotlin Android application to bypass browser rendering bottlenecks and target **120 FPS** with ultra-low latency. See [[CASE_STUDIES#Chapter 12 Evolving to Modular Multi-Device Platform]].
+- [ ] **Kotlin WebSocket Engine**: Connect native client directly to `protocol.rs` serializations.
+- [ ] **MediaCodec Hardware Decoding**: Decode H.264 streams directly into native Android `SurfaceView` or Jetpack Compose Canvas.
+- [ ] **Native MotionEvent Handler**: Access stylus API parameters (`pressure`, `orientation`, `tilt`, and hover events) with zero latency overhead.
+- [ ] **Samsung S Pen SDK Integration**: Calibrate S Pen-specific hover and Air Action signals.
 
-#### Priority A — Drawing Accuracy & Latency (Investigations & Tuning)
-- [x] **Verify pen pressure range**: Confirm whether Win32 Synthetic Pointer API accepts 0–1024 or a wider range (e.g., 0–8191). Verified that 1024 is the native Win32 API limit. See [CASE_STUDIES.md Chapter 4](./CASE_STUDIES.md#chapter-4-pressure-range-verification-0-1024-vs-0-8191).
-- [x] **Improve video timestamp precision**: Upgraded timing resolution to microseconds and shifted the timestamp boundary to the capture moment. See [CASE_STUDIES.md Chapter 10](./CASE_STUDIES.md#chapter-10-frame-pacing--timing-resolution).
-- [x] **Evaluate WebSocket input buffer**: Tuned inbound/outbound queues to 128 and implemented priority-aware frame coalescing. See [CASE_STUDIES.md Chapter 5](./CASE_STUDIES.md#chapter-5-websocket-queue-buffer-size--frame-coalescing).
-
-#### Priority B — Build & Distribution Improvements (Known Limitation)
-- [x] **Remove `bash` dependency on Windows build**: Replace `build.rs`'s `Command::new("bash")` FFmpeg build step with a PowerShell script or a pre-built FFmpeg DLL strategy, so `cargo build` works natively on Windows without Git Bash or MSYS2.
-- [x] **Investigate static FFmpeg linking on Windows**: Currently `dylib`. Static linking would make the `.exe` self-contained.
-
-### Phase 2 — Plug-and-Play USB & Connectivity (Next Priority)
-
-Goal: Make connecting the tablet to the PC seamless and feel like a finished product, especially for USB-connected setups.
-
-- [ ] **Auto ADB reverse**: Detect if an Android device is connected via USB and automatically run `adb reverse tcp:1701 tcp:1701` and `adb reverse tcp:9001 tcp:9001`.
-- [ ] **mDNS / auto-discovery**: Broadcast the Weylus Studio server via mDNS so the tablet browser can discover the PC without manually entering an IP address.
-- [ ] **Reconnection UX**: Implement the deferred [new frontend patch](https://github.com/H-M-H/Weylus/pull/290) for click-to-reconnect and HiDPI coordinate accuracy.
-
-
-### Phase 3 — Android Native Client (Kotlin + Compose)
-
-Goal: Replace the browser frontend with a low-latency Android native client capable of delivering a SuperDisplay-class experience.
-
-**Why Kotlin Native + Jetpack Compose over Flutter**:
-
-| Capability                   | Flutter              | Kotlin Native |
-| ---------------------------- | -------------------- | ------------- |
-| Modern UI                    | Excellent            | Excellent     |
-| Android API access           | Plugin layer         | Direct access |
-| MotionEvent                  | Indirect             | Native        |
-| Stylus pressure              | Good                 | Excellent     |
-| Tilt support                 | Good                 | Excellent     |
-| Hover support                | Limited              | Excellent     |
-| Samsung S Pen SDK            | Plugin/manual bridge | Native        |
-| USB detection                | Good                 | Excellent     |
-| BroadcastReceiver            | Plugin/manual bridge | Native        |
-| MediaCodec hardware decoding | Plugin               | Native        |
-| Lowest possible latency      | Good                 | Excellent     |
-| Android ecosystem support    | Excellent            | Official      |
-| Jetpack Compose              | No                   | Yes           |
-
-**Planned Android app architecture**:
-```text
-weylus-android/ (Kotlin Native + Jetpack Compose)
-│
-├── ui/
-│     ConnectScreen.kt      # IP/port entry, QR scan, mDNS discovery
-│     CanvasScreen.kt       # Full-screen drawing canvas + low-latency video overlay
-│
-├── network/
-│     WebSocketClient.kt    # Sends PointerEvent JSON matching protocol.rs
-│     VideoStream.kt        # Receives H.264 video streams
-│
-├── stylus/
-│     StylusManager.kt      # MotionEvent handler (pressure, tilt, tool types)
-│
-├── usb/
-│     UsbManager.kt         # Detects USB connection, triggers BroadcastReceiver
-│     AdbReverseManager.kt  # Integrates ADB port forwarding triggers
-│
-├── discovery/
-│     MdnsManager.kt        # Auto-discovers Weylus Studio server
-│
-└── decoder/
-      MediaCodecPlayer.kt   # Direct low-latency hardware decoding via MediaCodec
-```
-
-- [ ] **Phase 3.1**: WebSocket client in Kotlin sending `PointerEvent` JSON matching `protocol.rs` exactly.
-- [ ] **Phase 3.2**: Low-latency video pipeline using Android `MediaCodec` direct decoding into a `SurfaceView` / `TextureView`.
-- [ ] **Phase 3.3**: Android MotionEvent Stylus API integration (`event.pressure`, `event.orientation`, `event.axisValue(AXIS_TILT)`, `event.toolType`).
-- [ ] **Phase 3.4**: Samsung S Pen SDK integration (pressure calibration, hover events, Air Actions).
-
-
-### Phase 4 — Virtual Display & Second Screen
-
-Goal: Use the tablet as a true second screen, not just a mirror.
-
-- [ ] **Virtual display driver on Windows**: Investigate IddCx (Indirect Display Driver) or similar to create a virtual monitor that Weylus Studio can capture and stream exclusively to the tablet.
-- [ ] **Pen-only mode**: When using a virtual display, route all tablet pen input directly to the virtual screen coordinate space, eliminating the need for coordinate scaling.
-- [ ] **SuperDisplay-class experience**: Full drawing canvas on the tablet with hardware-accurate pressure and tilt, matching the experience of a dedicated drawing tablet.
+### Phase 4 — Virtual Display & Second Screen (Future 🚀)
+* **Goal**: Leverage Windows Indirect Display Driver (IddCx) to create a virtual monitor, streaming the workspace exclusively to the tablet for a complete dual-display drawing experience.
 
 ---
 
 ## Section 4: Rust Learning Milestones
 
-A personal learning track aligned with the Weylus Studio codebase, for someone coming from a Python/AI engineering background.
-
 | Milestone | Concept | Applied in Weylus Studio | Status |
 | :--- | :--- | :--- | :--- |
-| **M1** | Variables, functions, structs, enums | `protocol.rs` — pure data structures | [ ] |
-| **M2** | Ownership, borrowing, `&`, `&mut` | `capturable/mod.rs`, `websocket.rs` | [ ] |
-| **M3** | Traits, `impl Trait`, `Box<dyn Trait>` | `input/device.rs`, `WeylusSender` trait | [ ] |
-| **M4** | Error handling: `Result<T, E>`, `Option<T>`, `?` | `cerror.rs`, all `match` blocks | [ ] |
-| **M5** | Pattern matching: `match`, `if let`, `while let` | `autopilot_device_win.rs` pointer dispatch | [ ] |
-| **M6** | Async/Await with Tokio | `web.rs`, `websocket.rs` async loops | [ ] |
-| **M7** | Unsafe Rust & raw pointers | `autopilot_device_win.rs` Win32 calls | [ ] |
-| **M8** | FFI: calling C from Rust | `video.rs` → `lib/encode_video.c` | [ ] |
-| **M9** | Conditional compilation: `#[cfg(...)]` | Throughout, OS-specific module gating | [ ] |
-| **M10** | Build scripts: `build.rs` | `build.rs` — tsc, FFmpeg, link flags | [ ] |
+| **M1** | Variables, functions, structs, enums | `protocol.rs` — pure data structures | [x] |
+| **M2** | Ownership, borrowing, `&`, `&mut` | `capturable/mod.rs`, `websocket.rs` | [x] |
+| **M3** | Traits, `impl Trait`, `Box<dyn Trait>` | `input/device.rs`, `WeylusSender` trait | [x] |
+| **M4** | Error handling: `Result<T, E>`, `Option<T>`, `?` | `cerror.rs`, all `match` blocks | [x] |
+| **M5** | Pattern matching: `match`, `if let`, `while let` | `autopilot_device_win.rs` pointer dispatch | [x] |
+| **M6** | Async/Await with Tokio | `web.rs`, `websocket.rs` async loops | [/] |
+| **M7** | Unsafe Rust & raw pointers | `autopilot_device_win.rs` Win32 calls | [/] |
+| **M8** | FFI: calling C from Rust | `video.rs` → `lib/encode_video.c` | [/] |
+| **M9** | Conditional compilation: `#[cfg(...)]` | Throughout, OS-specific module gating | [/] |
+| **M10** | Build scripts: `build.rs` | `build.rs` — tsc, FFmpeg, link flags | [/] |

@@ -58,11 +58,12 @@ pub fn build() {
         has_videotoolbox: false,      // VideoToolbox is macOS-only
         has_mediafoundation: false,   // MediaFoundation is Windows-only
         has_libnpp: enable_libnpp,    // Opt-in via env var
-        typescript: build_common::TypeScriptCompilerSource::GlobalTsc,
+        shell: "",
+        shell_flag: "",
     };
 
     // Compile shared resources using capability declaration
-    build_common::compile_typescript(&caps);
+    build_common::build_web_client(&caps);
     build_common::compile_c_helpers(&caps, &dist_dir);
 
     // Compile Linux-specific C helpers (uinput, X11 capture)

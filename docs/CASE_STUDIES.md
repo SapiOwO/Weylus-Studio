@@ -1,576 +1,277 @@
-# Case Studies: Bug Investigations, Root-Cause Analysis & Engineering Lessons
+# Case Studies: Architecture, Performance, & Shared Engineering Lessons
 
-This document compiles all case studies for Weylus Studio. Each chapter documents a specific technical challenge, a 5W+1H diagnostic analysis, the root cause, and the implemented fix. All findings are mapped to the source code files and line numbers where the issues were discovered.
+This unified document compiles all case studies for Weylus Studio. Each chapter documents a major design decision, technical challenge, root-cause analysis, and the final implementation details, mapped to their specific commit lifecycle milestones.
 
 ---
 
 ## Document Index & Changelog Timeline
 
-### Confirmed Bugs
-
-| Chapter | Focus Area | Date | Key Finding | Status |
+| Chapter | Focus Area | Date | Key Architectural Enhancement | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Chapter 1** | Memory Leak in Windows Touch Injection | 2026-06-18 | `Box::into_raw()` without `Box::from_raw()` leaks heap memory on every multitouch event | **Resolved** ✅ |
-| **Chapter 2** | Handle Leak: Synthetic Pointer Devices | 2026-06-18 | `CreateSyntheticPointerDevice` handles never released on shutdown | **Resolved** ✅ |
-| **Chapter 3** | Crash Risk: `PointerType::Unknown` Panic | 2026-06-18 | `todo!()` macro causes full application panic on unrecognized pointer type | **Resolved** ✅ |
-| **Chapter 4** | Pressure Range (0-1024 vs 0-8191) | 2026-06-19 | The 0-1024 scaling factor matches the maximum native range of Win32 Synthetic Pointer API | **Resolved** ✅ |
-| **Chapter 5** | WebSocket Queue & Frame Coalescing | 2026-06-19 | Outbound video queues buffer video frames causing visual lag; fixed via priority coalescing | **Resolved** ✅ |
-| **Chapter 10** | Frame Pacing & Timing Resolution | 2026-06-19 | Millisecond timing (`.as_millis()`) causing micro-stuttering under Windows DWM compositor | **Resolved** ✅ |
-
-### Hypothesis / Candidate Bugs (Under Investigation)
-
-| Chapter | Focus Area | Date | Key Finding | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| **Chapter 6** | Windows Native Build Environment Issues | 2026-06-18 | CRLF conversions, WSL bash hijacking, and missing NASM cause baseline build fails | **Resolved** |
-| **Chapter 7** | Build System Modularization: Dual-Backend Dispatcher | 2026-06-18 | Monolithic `build.rs` is a "shared execution surface" — Windows prebuilt changes leak into Linux/macOS pipelines | **Resolved** |
-| **Chapter 8** | Capability Layer Extraction: `common.rs` Semantic Separation | 2026-06-18 | `common.rs` was mixing build orchestration, capability detection, and environment assumptions — all three are different concern classes | **Resolved** |
-| **Chapter 9** | Flat Typed Build Capabilities: Abstraction Freeze | 2026-06-19 | The boolean capability system was evolving into an over-engineered config system; refactoring to flat, typed contracts freezes abstraction creep | **Resolved** |
-| **Chapter 11** | Community Patches (PR #290 & #291) Integration | 2026-06-19 | HiDPI coordinate offsets and lack of reconnection UX | **Needs verification** |
-
-
-> Case studies are living documents. New chapters are added as bugs are investigated, root-caused, and resolved.
-
----
-
-## System Engineering Context
-
-Weylus Studio is a **Rust-native screen mirroring and input injection server** that lets an Android tablet act as a graphics tablet for a Windows PC. The Windows input path is the most critical subsystem for drawing applications, as it is responsible for translating stylus pressure, tilt, and multitouch data from the tablet's browser into native Windows pointer events recognized by apps like Krita, Clip Studio Paint, and Photoshop.
-
-The core Windows input file is:
-* [`src/input/autopilot_device_win.rs`](../src/input/autopilot_device_win.rs) — Win32 synthetic pointer injection logic.
+| **Chapter 1** | Memory Leak in Windows Touch Injection | 2026-06-18 | `Box::into_raw()` replaced with `Vec::as_mut_ptr()` borrow | **Resolved** ✅ |
+| **Chapter 2** | Handle Leak: Synthetic Pointer Devices | 2026-06-18 | `impl Drop for WindowsInput` added to destroy pointer device handles | **Resolved** ✅ |
+| **Chapter 3** | Crash Risk: `PointerType::Unknown` Panic | 2026-06-18 | Placeholder `todo!()` replaced with graceful `warn!` + `return` | **Resolved** ✅ |
+| **Chapter 4** | Pressure Range Verification (0-1024) | 2026-06-19 | Calibrated stylus scaling factors to match Win32 native limits | **Resolved** ✅ |
+| **Chapter 5** | WebSocket Queue & Frame Coalescing | 2026-06-19 | Outbound video queues buffer video frames; fixed via order-preserving frame coalescing | **Resolved** ✅ |
+| **Chapter 6** | Windows Native Build Environment Issues | 2026-06-18 | Git Line conversions, NASM installation, and static compiler fixes | **Resolved** ✅ |
+| **Chapter 7** | Dual-Backend Dispatcher Architecture | 2026-06-18 | Monolithic `build.rs` decoupled into per-OS modules (`windows.rs`, `linux.rs`, `macos.rs`) | **Resolved** ✅ |
+| **Chapter 8** | Capability Layer Extraction (`common.rs`) | 2026-06-18 | Extracted OS-specific flags from build orchestration helper | **Resolved** ✅ |
+| **Chapter 9** | Flat Typed Build Capabilities | 2026-06-19 | Frozen capability schema to prevent abstraction bloat | **Resolved** ✅ |
+| **Chapter 10** | Frame Pacing & Timing Resolution | 2026-06-19 | Microsecond resolution presentation timestamping at capture boundary | **Resolved** ✅ |
+| **Chapter 11** | Build Pipeline & Virtual Keyboard Serialization | 2026-06-21 | Streamlined node compile triggers, dropped string protocols, implemented virtual_keys.rs | **Resolved** ✅ |
+| **Chapter 12** | Evolving to Modular Multi-Device Platform | 2026-06-21 | Shifting from web-based mirroring to native Kotlin client & USB 120 FPS target | **Vision Defined** 🚀 |
+| **Chapter 13** | Build Decoupling & Configuration Fallback Safety | 2026-07-03 | Platform-neutral shell injection in `BuildCapabilities` and safe fallback struct generation | **Resolved** ✅ |
 
 ---
 
 ## Chapter 1: Memory Leak in Windows Touch Injection
 * **Investigated**: 2026-06-18
 * **Resolved**: 2026-06-18
-* **Status**: ✅ **Resolved.** Fix applied — `Box::into_raw()` replaced with `Vec::as_mut_ptr()` borrow.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Any user running Weylus Studio on Windows with a multitouch screen or a tablet using finger touch gestures.
-* **Who executes the problematic code**: The `send_pointer_event` function in `WindowsInput` (`autopilot_device_win.rs`) whenever a `PointerType::Touch` event is received.
+* **Who is affected**: Any user running Weylus Studio on Windows using multi-touch gestures or stylus drawing.
+* **Who executes the code**: The `send_pointer_event` function in `WindowsInput` (`src/input/autopilot_device_win.rs`) whenever `PointerType::Touch` is dispatched.
 
 #### WHAT
-* **What was the issue**: Each multitouch frame allocated a `Box<[POINTER_TYPE_INFO]>` on the Rust heap, converted it to a raw pointer via `Box::into_raw()`, passed the pointer to `InjectSyntheticPointerInput`, and then **never freed the allocation**. The `Box::from_raw()` call that would return ownership to Rust — and trigger the destructor — was missing.
-
-The original problematic code (now replaced):
-```rust
-// BEFORE (leaked memory on every touch frame):
-let b: Box<[POINTER_TYPE_INFO]> = pointer_type_info_vec.into_boxed_slice();
-let m: *mut POINTER_TYPE_INFO = Box::into_raw(b) as _; // Rust stops managing this memory
-InjectSyntheticPointerInput(self.touch_device_handle, m, len as u32);
-// 'm' was never freed. 'Box::from_raw(m)' was missing.
-
-// AFTER (current code — fixed, autopilot_device_win.rs lines 146–151):
-InjectSyntheticPointerInput(self.touch_device_handle, pointer_type_info_vec.as_mut_ptr(), len as u32);
-// Vec is dropped automatically at end of scope. No leak.
-```
+* **What is the issue**: Each multitouch frame allocated a `Box<[POINTER_TYPE_INFO]>` on the Rust heap, converted it to a raw pointer via `Box::into_raw()`, passed the pointer to `InjectSyntheticPointerInput`, and then **never freed the allocation**. The `Box::from_raw()` call that would return ownership to Rust — and trigger the destructor — was missing.
 
 #### WHERE
-* **Where does it occur**: `src/input/autopilot_device_win.rs`, inside the `PointerType::Touch` branch of `send_pointer_event`, lines 146–153.
+* **Where does it occur**: `src/input/autopilot_device_win.rs` inside the `PointerType::Touch` branch of `send_pointer_event`.
 
 #### WHEN
-* **When is it triggered**: Every time a `MOVE`, `DOWN`, or `UP` touch event is received from the tablet while at least one finger is on the screen. For a drawing session, this could be hundreds to thousands of events per minute.
+* **When is it triggered**: Every time a `MOVE`, `DOWN`, or `UP` touch event is received from the tablet. In drawing sessions, this leaks memory at up to 120-240 times per second.
 
 #### WHY
-* **Root Cause**: `Box::into_raw()` is a Rust function that transfers heap ownership out of Rust's memory management system into a raw C-style pointer (`*mut T`). After this call, Rust will **never** automatically free the memory. The intent was likely to pass the data pointer to the Windows API, but the allocation was never reclaimed afterward.
-
-`InjectSyntheticPointerInput` is a synchronous Win32 function — it reads the data during the call and returns. The pointer does not need to outlive the function call. Therefore, `Box::into_raw()` (which implies long-lived ownership transfer) was the wrong tool for this job.
+* **Why does it happen (Root Cause)**: `Box::into_raw()` transfers heap ownership out of Rust's compiler control into a raw C pointer. Unless explicitly reclaimed using `Box::from_raw()`, that memory block is permanently leaked. Since the Win32 function `InjectSyntheticPointerInput` reads the data synchronously, holding heap ownership was unnecessary.
 
 #### HOW
-* **Proposed Fix**: Eliminate the `Box` conversion entirely. Borrow a raw pointer directly from the `Vec` using `.as_mut_ptr()`. Since `Vec` is owned by the local scope, Rust automatically drops and frees it when the function returns. No manual memory management required.
-
-```rust
-// BEFORE (memory leak):
-let b: Box<[POINTER_TYPE_INFO]> = pointer_type_info_vec.into_boxed_slice();
-let m: *mut POINTER_TYPE_INFO = Box::into_raw(b) as _;
-InjectSyntheticPointerInput(self.touch_device_handle, m, len as u32);
-
-// AFTER (correct, safe, idiomatic Rust):
-InjectSyntheticPointerInput(
-    self.touch_device_handle,
-    pointer_type_info_vec.as_mut_ptr(),
-    len as u32,
-);
-// Vec is dropped automatically here. No leak.
-```
-
-### 2. Engineering Lesson
-
-`Box::into_raw()` is a one-way operation — it transfers sole ownership of heap memory to an unmanaged raw pointer. It is only appropriate when:
-- You are handing ownership to a C library that will later call a corresponding free/destroy function, **and**
-- You document which function will call `Box::from_raw()` to reclaim the memory.
-
-For synchronous calls that only need to *read* the data (like `InjectSyntheticPointerInput`), use `.as_ptr()` or `.as_mut_ptr()` on a `Vec` or slice instead — these borrow the memory without transferring ownership.
+* **How it was resolved**: Replaced the heap allocation and raw box transfer with a stack borrow using `pointer_type_info_vec.as_mut_ptr()`. The vector is clean-dropped automatically at the end of the execution scope:
+  ```rust
+  InjectSyntheticPointerInput(self.touch_device_handle, pointer_type_info_vec.as_mut_ptr(), len as u32);
+  ```
 
 ---
 
-## Chapter 2: Handle Leak — Synthetic Pointer Devices Never Released
+## Chapter 2: Handle Leak: Synthetic Pointer Devices
 * **Investigated**: 2026-06-18
 * **Resolved**: 2026-06-18
-* **Status**: ✅ **Resolved.** `impl Drop for WindowsInput` added with `DestroySyntheticPointerDevice` cleanup.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: The Windows OS kernel handle table for the Weylus Studio process on every run.
+* **Who is affected**: The Windows OS kernel handle table for the Weylus Studio process.
 
 #### WHAT
-* **What is the issue**: Two synthetic pointer device handles are created at startup (`pointer_device_handle` and `touch_device_handle`) via `CreateSyntheticPointerDevice`. These handles represent kernel-level resources. There is no `impl Drop for WindowsInput` in the codebase, so when a `WindowsInput` object is dropped (e.g., on client disconnect or app shutdown), the handles are **never passed to `DestroySyntheticPointerDevice`**.
-
-The initialization code (`autopilot_device_win.rs`, lines 30–31):
-```rust
-pointer_device_handle: CreateSyntheticPointerDevice(PT_PEN, 1, 1),
-touch_device_handle: CreateSyntheticPointerDevice(PT_TOUCH, 5, 1),
-```
-
-Originally there was no corresponding cleanup anywhere in the file. This has since been fixed — see HOW section below.
+* **What is the issue**: Raw handles to the synthetic pointer device (`pointer_device_handle`) and touch device (`touch_device_handle`) are allocated via `CreateSyntheticPointerDevice` at startup. However, they were never released upon application shutdown or device drop, leaving active kernel-level leaks.
 
 #### WHERE
-* **Where does it occur**: `src/input/autopilot_device_win.rs`. The `WindowsInput` struct holds raw pointers to kernel handles but implements no `Drop` trait.
+* **Where does it occur**: `src/input/autopilot_device_win.rs` inside the `WindowsInput` struct wrapper.
 
 #### WHEN
-* **When is it triggered**: On every Weylus session that uses Windows input. If a user frequently reconnects their tablet (starting and stopping sessions), each session creates two new unreleased handles.
+* **When is it triggered**: Whenever a client connects/disconnects, initiating a new `WindowsInput` instantiation. Multiple tablet reconnections quickly inflate leaked OS handle tables.
 
 #### WHY
-* **Root Cause**: The `WindowsInput` struct was implemented without a destructor (`Drop` trait). In Rust, the `Drop` trait is the idiomatic mechanism for running cleanup code when a value goes out of scope — equivalent to a C++ destructor. Without it, the raw pointer fields (`*mut HSYNTHETICPOINTERDEVICE__`) are dropped as integers, not as handles.
+* **Why does it happen (Root Cause)**: The `WindowsInput` struct lacked a destructor implementation. Raw pointers representing C-style OS handles (`*mut HSYNTHETICPOINTERDEVICE__`) do not implement automatic garbage collection or destructor drop behavior in Rust.
 
 #### HOW
-* **Proposed Fix**: Implement `Drop` for `WindowsInput` to call `DestroySyntheticPointerDevice` on both handles:
-
-```rust
-impl Drop for WindowsInput {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.pointer_device_handle.is_null() {
-                DestroySyntheticPointerDevice(self.pointer_device_handle);
-            }
-            if !self.touch_device_handle.is_null() {
-                DestroySyntheticPointerDevice(self.touch_device_handle);
-            }
-        }
-    }
-}
-```
-
-### 2. Engineering Lesson
-
-In Rust, when a struct holds raw pointers to OS/kernel resources (file handles, device handles, sockets), the `Drop` trait is the mandatory cleanup contract. Rust does not automatically call OS-level release functions — it only drops the pointer integer value itself. Any struct that wraps a resource obtained from an OS API (`Create*`, `Open*`, `alloc_*`) must implement `Drop` to pair with the corresponding release function (`Destroy*`, `Close*`, `free_*`).
+* **How it was resolved**: Implemented the `Drop` trait for `WindowsInput` to guarantee that both device handles are explicitly destroyed using `DestroySyntheticPointerDevice` when the struct goes out of scope:
+  ```rust
+  impl Drop for WindowsInput {
+      fn drop(&mut self) {
+          unsafe {
+              if !self.pointer_device_handle.is_null() {
+                  DestroySyntheticPointerDevice(self.pointer_device_handle);
+              }
+              if !self.touch_device_handle.is_null() {
+                  DestroySyntheticPointerDevice(self.touch_device_handle);
+              }
+          }
+      }
+  }
+  ```
 
 ---
 
-## Chapter 3: Crash Risk — `PointerType::Unknown` Causes Application Panic
+## Chapter 3: Crash Risk: `PointerType::Unknown` Panic
 * **Investigated**: 2026-06-18
 * **Resolved**: 2026-06-18
-* **Status**: ✅ **Resolved.** `todo!()` replaced with `warn!()` + `return` for graceful degradation.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Any client — including the current browser frontend or a future Flutter native client — that sends a pointer event where the pointer type is not recognized by the browser's PointerEvents API.
+* **Who is affected**: Any client sending a pointer event with unrecognized or unpopulated device characteristics.
 
 #### WHAT
-* **What is the issue**: The `send_pointer_event` function in `WindowsInput` handles three known pointer types (`Pen`, `Touch`, `Mouse`) but uses `todo!()` as the handler for the `Unknown` variant:
-
-```rust
-PointerType::Unknown => todo!(),
-```
-
-In Rust, `todo!()` is a macro that expands to `panic!()` with the message `"not yet implemented"`. A panic in this context will **terminate the entire Weylus server process**, disconnecting all active sessions.
+* **What is the issue**: The match statement for handling inbound `PointerType` contained a placeholder `todo!()` macro for the `Unknown` variant, which triggered a complete application panic.
 
 #### WHERE
-* **Where does it occur**: `src/input/autopilot_device_win.rs`, line 212, in the `match event.pointer_type` block.
+* **Where does it occur**: `src/input/autopilot_device_win.rs` in `send_pointer_event()`.
 
 #### WHEN
-* **When is it triggered**: When a browser or client sends a `PointerEvent` whose `pointerType` field deserializes to the empty string `""`. In `protocol.rs`, the `Unknown` variant is mapped to:
-```rust
-#[serde(rename = "")]
-Unknown,
-```
-This can happen on some older Android browsers or in edge-case touch scenarios where the browser does not report a pointer type.
+* **When is it triggered**: Triggered when a browser client fails to identify the hardware stylus/mouse type and sends an empty string `""` as the pointer type.
 
 #### WHY
-* **Root Cause**: `todo!()` was used as a development placeholder to mark the branch as unimplemented. It was never replaced with either a proper implementation or a graceful no-op. In production, this is equivalent to an unhandled exception that crashes the server.
+* **Why does it happen (Root Cause)**: `todo!()` expands to `panic!()` in Rust. A network-exposed interface matching client parameters should never contain execution-halting panic macros.
 
 #### HOW
-* **Proposed Fix**: Replace `todo!()` with a `warn!` log and a `return` — the event is silently dropped, which is the correct behavior for an unrecognized input type:
-
-```rust
-// BEFORE (crash):
-PointerType::Unknown => todo!(),
-
-// AFTER (graceful degradation):
-PointerType::Unknown => {
-    warn!("Received pointer event with unknown pointer type, ignoring.");
-    return;
-}
-```
-
-### 2. Engineering Lesson
-
-`todo!()` and `unimplemented!()` are **development-only** markers in Rust. They must never ship in production code paths that can be triggered by external input (network events, file data, user actions). Before releasing any version, every `todo!()` must be either:
-1. Replaced with a real implementation, or
-2. Replaced with a documented graceful fallback (`warn!()` + `return`).
-
-The compiler does not warn about `todo!()` in match arms. A production audit pass should grep for `todo!()`, `unimplemented!()`, and `panic!()` in all code paths reachable from network input handlers.
+* **How it was resolved**: Replaced `todo!()` with a warning log and an immediate return, gracefully skipping processing of unrecognized input:
+  ```rust
+  PointerType::Unknown => {
+      warn!("Received pointer event with unknown pointer type, ignoring.");
+      return;
+  }
+  ```
 
 ---
 
-## Chapter 4: Pressure Range Verification (0-1024 vs 0-8191)
+## Chapter 4: Pressure Range Verification (0-1024)
 * **Investigated**: 2026-06-19
 * **Resolved**: 2026-06-19
-* **Status**: ✅ **Verified.** The current 0-1024 scaling factor is the Win32 API limit and is correct.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Stylus users drawing on Windows drawing applications (like Photoshop, Krita, or Clip Studio Paint) who want to verify that stylus pressure gradients are delivered at maximum fidelity.
+* **Who is affected**: Digital artists requiring precise stylus pressure increments inside design tools (Photoshop, Krita).
 
 #### WHAT
-* **What is the issue**: The codebase translates normalized stylus pressure `0.0` - `1.0` to Win32 pointer events using `(event.pressure * 1024f64) as u32`. We needed to verify if the Win32 Synthetic Pointer API supports professional ranges up to `8191` (the professional tablet standard) to prevent loss of fidelity.
+* **What is the issue**: The codebase scales pressure using `(event.pressure * 1024f64) as u32`. We investigated whether this scale factor should be raised to a professional grade resolution of `8191`.
 
 #### WHERE
-* **Where does it occur**: `src/input/autopilot_device_win.rs` lines 114 and 137.
+* **Where does it occur**: `src/input/autopilot_device_win.rs` in `send_pointer_event()`.
 
 #### WHEN
-* **When is it triggered**: When drawing on the tablet with pressure sensitivity.
+* **When is it triggered**: Executed whenever pen pressure is active.
 
 #### WHY
-* **Root Cause / Finding**: Detailed investigation of Microsoft Win32 API specifications for `POINTER_PEN_INFO` and `POINTER_TOUCH_INFO` reveals that:
-  1. The `pressure` field in both structures is explicitly defined by Windows as a value normalized to a range between **0 and 1024**.
-  2. The default value if no pressure is reported is `0` for pens and `512` for touch points.
-  3. Setting any pressure values larger than 1024 violates the Win32 specification and leads to clamping or rejection at the kernel level.
-  4. Therefore, `1024` is the maximum native precision that Windows input injection can accept.
+* **Why does it happen (Root Cause)**: Microsoft's Win32 API design for `POINTER_PEN_INFO` and `POINTER_TOUCH_INFO` defines pressure as a strictly bounded normalized range from `0` to `1024`. Injecting any value outside this bounds results in clamp validation errors or silent rejection by the Windows kernel.
 
 #### HOW
-* **Resolution**: Verified that the current scaling factor of `1024` is correct and mathematically optimal for the Win32 target platform. No code changes are required as the implementation is already fully compliant with the platform's limits.
-
-### 2. Engineering Lesson
-
-**Do not optimize beyond platform boundaries.** 
-
-Before modifying code to match professional hardware standards (like Wacom's 8192 pressure levels), check the target OS injection API capabilities first. Even if the stylus hardware reports higher fidelity, the OS input subsystem may enforce a lower normalized range. In these cases, the OS range is the absolute hard ceiling, and any scaling beyond it is redundant or invalid.
+* **How it was resolved**: Confirmed that the current scale factor of `1024` is the absolute hardware-injection limit of the Windows platform. The architecture is validated and finalized as correct.
 
 ---
 
-## Chapter 5: WebSocket Queue Buffer Size & Frame Coalescing
+## Chapter 5: WebSocket Queue & Frame Coalescing
 * **Investigated**: 2026-06-19
 * **Resolved**: 2026-06-19
-* **Status**: ✅ **Resolved.** Queue capacities tuned to 128 and order-preserving frame coalescing implemented.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Stylus users drawing rapid strokes or gestures, experiencing brush input lag, jagged lines, or visible visual delay.
+* **Who is affected**: Stylus users experiencing brush lagging or frame stuttering under high drawing frequencies or transient network congestion.
 
 #### WHAT
-* **What is the issue**: 
-  1. The inbound channel for client input events had a fixed-size buffer of 32. For professional stylus devices sampling at 120Hz-240Hz, a brief server scheduling delay would fill the buffer, leading to backpressure and packet delivery delay on the WebSocket.
-  2. The outbound WebSocket channel buffered up to 32 video frames (`WsMessage::Video`). At 60fps, 32 frames represents ~533ms of visual latency. If the network was temporarily congested, the outbound writer thread sent stale video frames, causing a "sticky brush" lag feel.
+* **What is the issue**:
+  1. The inbound control event buffer was restricted to `32`, leading to backpressure and socket blocking on high sampling rate stylus strokes.
+  2. The outbound queue buffered H.264 video frames alongside control packets. Under network drop conditions, stale video frames filled the buffer queue, causing up to ~500ms of lag.
 
 #### WHERE
-* **Where does it occur**: `src/websocket.rs` inside the `weylus_websocket_channel` function and its outbound frame dispatcher task.
+* **Where does it occur**: `src/websocket.rs` inside `weylus_websocket_channel`.
 
 #### WHEN
-* **When is it triggered**: During rapid drawing bursts or gestures, and whenever network bandwidth fluctuated under load.
+* **When is it triggered**: Active when high frequency stylus movements generate dense streams of pointer packages.
 
 #### WHY
-* **Root Cause**: The system lacked distinction between the lossy real-time requirements of interactive video and the strict ordering requirements of control messages. Treating video frames as reliable, sequential archival frames meant that stale frames were queued and sent in full, accumulating latency.
+* **Why does it happen (Root Cause)**: The video pipeline treated real-time video frames as reliable sequenced blocks rather than drop-tolerant packets. This lack of differentiation allowed stale visual states to delay newer frames.
 
 #### HOW
-* **Resolution**:
-  1. Increased the inbound queue capacity (`sender_inbound`) from 32 to 128 to absorb high-frequency stylus input bursts without blocking the WebSocket receiver loop.
-  2. Increased the outbound queue capacity (`sender_outbound`) from 32 to 128 to buffer transient text spikes.
-  3. Implemented a **Priority-Preserving / Coalesce Consecutive Only** strategy in the outbound tokio task. When a `WsMessage::Video` frame is processed:
-     - The task drains the outbound queue using `try_recv()` as long as subsequent messages are also `WsMessage::Video` frames.
-     - Older video frames are dropped, and only the latest video frame is sent.
-     - The draining loops **breaks** immediately if it encounters a non-video message (like `MessageOutbound::NewVideo` or `WsMessage::Frame`).
-     - This guarantees that critical decoder setup commands (`NewVideo`) are never reordered past video frames (which would cause client decoder crashes or state-machine mismatch), while still shedding stale video frames under network pressure.
-
-### 2. Engineering Lesson
-
-Real-time interactive systems must treat video and control streams with different delivery philosophies:
-- **Interactive Video**: Lossy. Obsolete video frames are useless; it is better to drop old frames than to delay new ones.
-- **Control Plane**: Reliable. Messages like decoder resets, layout dimensions, or config updates are state-dependent and must never be reordered or lost.
-
-A pure "drain completely" strategy for coalescing is dangerous because it reorders control messages past video frames. An **Order-Preserving (Coalesce Consecutive)** strategy is the correct model to balance low latency with state-machine correctness.
+* **How it was resolved**:
+  - Expanded inbound/outbound queue boundaries to `128` channels.
+  - Implemented an **Order-Preserving Frame Coalescing** strategy: if subsequent messages in the queue are video frames, we discard intermediate stale states and deliver only the latest frame. Crucially, the loop stops immediately if any control packet (such as configuration switches) is found, keeping critical setup bounds correct.
 
 ---
 
-## Chapter 6: Investigation — Windows Native Environment Build Issues
-* **Investigated**: 2026-06-18
-* **Status**: Confirmed environment issues. Fixes documented and applied.
-
-### 1. 5W+1H Diagnostic Matrix
-
-#### WHO
-* **Who is affected**: Any developer trying to build Weylus Studio upstream default on a Windows development machine that has WSL (Windows Subsystem for Linux) and git's default line ending config enabled.
-
-#### WHAT
-* **What is the issue**: The baseline build (`cargo check`) fails at the custom build step `weylus` during FFmpeg compilation. The build logs show parsing errors like `clean.sh: line 4: syntax error near unexpected token $'do\r'`, compiler errors like `cuda_llvm requested but not found`, TypeScript compiler failures due to missing global `tsc` command, and strict type errors when compiling `./ts/lib.ts`.
-
-#### WHERE
-* **Where does it occur**: In the shell script execution block driven by `build.rs` under the `deps/` directory, the typescript compilation in `build.rs` and `tsconfig.json`, and the file structure in `deps/dist_windows`.
-
-#### WHEN
-* **When is it triggered**: When running a default baseline build (`cargo check` or `cargo build`) on Windows.
-
-#### WHY
-* **Root Causes**:
-  1. **Line Ending Mismatch (CRLF vs LF):** Windows Git checked out files using CRLF (`\r\n`), causing Git Bash to raise syntax errors when executing the shell scripts.
-  2. **WSL Bash Hijacking:** `build.rs` calls `Command::new("bash")` which invokes the top-priority `bash.exe` from Windows `System32` (WSL Launcher). This changes the environment target to Linux inside WSL, causing compile errors.
-  3. **Missing NASM Assembler:** The underlying x264/FFmpeg source build requires `nasm` assembler to process assembly code.
-  4. **CUDA LLVM Requirement:** The configure scripts requested `--enable-cuda-llvm` which fails on platforms without LLVM/Clang CUDA toolchain support.
-  5. **TypeScript Global Command and Compiler Version strictness:** `tsc` was run directly via `cmd /c tsc` expecting a global command, and newer TypeScript compilers enforce strict type checks by default that fail on existing code.
-  6. **Interrupted Build/Skip Logic Error:** `build.rs` used `if dist_dir.exists() { return; }` to skip building FFmpeg. Since `x264` compilation ran first and created the folder `dist_dir`, any subsequent failure in FFmpeg compilation caused future build attempts to skip FFmpeg completely, resulting in missing headers.
-
-#### HOW
-* **Proposed Action & Applied Fixes**:
-  - **Autocrlf fix:** Configured git locally to prevent converting script line endings (`git config core.autocrlf input`), then did a hard reset (`git rm --cached -r .` and `git reset --hard`) to restore scripts as LF (`\n`) murni.
-  - **CMake & NASM install:** Installed CMake via `winget install Kitware.CMake` and NASM via `winget install NASM.NASM`.
-  - **PATH Override solution:** Prepend Git Bash, CMake, and NASM paths directly to the terminal sessions' `$env:PATH` to ensure `Command::new("bash")` calls Git Bash native (`msys`) instead of WSL.
-  - **Remove cuda-llvm:** Stripped `--enable-cuda-llvm` from `deps/build.sh` parameters since NVENC only requires `ffnvcodec` and `nv-codec-headers` to enable hardware-accelerated video streaming.
-  - **TypeScript npx execution and strictness bypass:** Configured `tsconfig.json` to disable strict type-checking (`strict: false`, `noImplicitAny: false`, `strictNullChecks: false`, `strictPropertyInitialization: false`), and modified `build.rs` to run `tsc` dynamically using `npx -y -p typescript tsc`.
-  - **FFmpeg Skip Logic fix:** Updated `build.rs` to verify the existence of the specific header `dist_dir.join("include/libavcodec/avcodec.h")` instead of the root `dist_dir` before skipping build steps.
-
----
-
-## Chapter 7: Build System Modularization — Dual-Backend Dispatcher Architecture
-* **Investigated**: 2026-06-18
-* **Status**: Resolved. Architecture implemented and verified.
-
-### 0. Background Context
-
-After resolving the Windows build environment issues documented in Chapter 6, the project successfully compiled FFmpeg + x264 from source on a Windows machine using MSVC + MSYS2 + NASM. The resulting `.lib` files were cached locally under `deps/prebuilt_windows/`.
-
-This raised a critical architectural question: the original monolithic `build.rs` (300+ lines) contained *all* platform logic — POSIX shell calls for Linux/macOS, Windows prebuilt linking, TypeScript compilation, and C helper compilation — in a **single compilation unit**. Every modification for Windows risked silently breaking Linux/macOS builds, and vice versa.
-
-The engineering team (including ChatGPT's advisory input) identified this as a **"shared build execution surface"** problem — a structural anti-pattern where logical isolation (if/else branches) gives a *false sense of separation* while the actual code blast radius remains the entire file.
-
-### 1. 5W+1H Diagnostic Matrix
-
-#### WHO
-* **Who is affected**: Every developer and CI system that builds Weylus Studio on any OS. Specifically:
-  - **Windows developers** who only need prebuilt `.lib` linking, not POSIX shell scripts.
-  - **Linux/macOS contributors** who maintain FFmpeg source-build pipelines (`deps/build.sh`) and system library linking.
-  - **The project maintainer** (current fork owner) who wants Windows-first optimization without destroying the community's Linux/macOS foundation.
-
-#### WHAT
-* **What is the issue**: The original `build.rs` was a single 300+ line file containing:
-  1. POSIX-specific logic: `Command::new("bash")` calls to `deps/build.sh` and `deps/clean.sh` for FFmpeg source compilation.
-  2. Windows-specific logic: prebuilt `.lib` path resolution and MSVC system library linking (`mfplat`, `bcrypt`, `shlwapi`, etc.).
-  3. Linux-specific logic: X11/VA-API/DRM library linking, `uinput.c` compilation, `pkg-config` feature gating.
-  4. macOS-specific logic: Apple framework linking (`VideoToolbox`, `CoreMedia`).
-  5. Shared logic: TypeScript compilation (`tsc`), C helper compilation (`lib/encode_video.c`), `cc::Build` calls.
-
-  All of this lived in one file separated only by `if cfg!(target_os = ...)` branches. This meant:
-  - **Any edit to the Windows prebuilt path could accidentally affect the Linux `dist_dir` resolution.**
-  - **Removing a POSIX dependency for Windows could delete a function that Linux/macOS still needs.**
-  - **IDE refactoring tools (rename, extract, delete unused) operate on the whole file, not per-branch.**
-  - **Code review diffs mix unrelated OS changes, making reviews error-prone.**
-
-  The original monolithic structure (simplified):
-  ```rust
-  // build.rs (BEFORE - monolith, ~300 lines)
-  fn main() {
-      // ... shared TypeScript compilation ...
-      // ... shared C helper compilation ...
-
-      if cfg!(target_os = "linux") {
-          // bash calls, dist_linux, X11 libs, uinput.c ...
-      } else if cfg!(target_os = "macos") {
-          // bash calls, dist_macos, Apple frameworks ...
-      } else if cfg!(target_os = "windows") {
-          // prebuilt_windows path, MSVC libs ...
-      }
-
-      // ... shared FFmpeg linking (but with OS-conditional link kind!) ...
-  }
-  ```
-
-#### WHERE
-* **Where does it occur**: `build.rs` (root of repository) — the Cargo build script that runs before `rustc` compilation.
-
-#### WHEN
-* **When is it triggered**: Every time `cargo build`, `cargo check`, or `cargo run` is executed. Cargo re-runs `build.rs` whenever any `cargo:rerun-if-changed` watched file changes.
-* **When did it become critical**: When the Windows build was migrated from "source-compile FFmpeg via bash" to "link prebuilt `.lib` files directly". This was a fundamental change in dependency model — Windows no longer needs POSIX tools at all — but the monolithic `build.rs` forced both models to coexist in the same execution flow.
-
-#### WHY
-* **Root Cause (Structural)**: The original Weylus upstream was designed as a **Linux-first project** where Windows and macOS were secondary ports. The `build.rs` grew organically by adding `if cfg!(...)` branches for each OS, which is fine when all OS targets share the same dependency model (source-compile FFmpeg). But when Windows migrated to prebuilt `.lib` files, the dependency model diverged fundamentally:
-
-  | Aspect | Linux/macOS | Windows (after migration) |
-  | :--- | :--- | :--- |
-  | FFmpeg source | Compiled from `deps/build.sh` via bash | **Not used** — prebuilt `.lib` from `deps/prebuilt_windows/` |
-  | External tools needed | `bash`, `make`, `nasm`, `cmake`, `pkg-config` | **None** — only MSVC linker |
-  | Link kind | `static` (self-compiled) or `dylib` (system) | `dylib` (prebuilt import libs) |
-  | Platform libs | X11, VA-API, DRM (Linux) / Frameworks (macOS) | `mfplat`, `bcrypt`, `ole32`, `shlwapi`, `vfw32` |
-  | C helper differences | `HAS_VAAPI` (Linux), `HAS_VIDEOTOOLBOX` (macOS) | `HAS_NVENC`, `HAS_MEDIAFOUNDATION` |
-
-  With this level of divergence, keeping everything in one file creates what ChatGPT accurately termed a **"shared build execution surface"** — where logical separation (if/else) is not the same as structural isolation (separate files with separate blast radii).
-
-* **Root Cause (Practical)**: Several concrete risk scenarios were identified:
-  1. **Accidental deletion**: A Windows developer removes a `build_ffmpeg()` function that "isn't called on Windows" → Linux/macOS builds break.
-  2. **Path collision**: Windows uses `deps/prebuilt_windows/lib`, Linux uses `deps/dist_linux/lib`. Both reference `dist_dir` but resolve differently. A refactor that renames one variable can break the other.
-  3. **Shared function mutation**: `compile_c_helpers()` has OS-conditional `#define` flags. Adding a Windows-only flag to the shared function body affects all OS compilation paths.
-  4. **IDE auto-cleanup**: Rust-analyzer or clippy may flag "unused imports" or "dead code" that are only used in non-Windows branches, tempting a developer to delete them.
-
-#### HOW
-* **Implemented Solution**: Split `build.rs` into a **thin dispatcher** + **per-OS module files** + **shared common module**.
-
-  **New file structure**:
-  ```text
-  Weylus-Studio/
-  ├── build.rs            # 28 lines — dispatcher only, routes to OS module
-  ├── build/
-  │   ├── common.rs       # 70 lines — shared: TypeScript (npx), C helpers (cc::Build)
-  │   ├── windows.rs      # 54 lines — prebuilt linking, Win32 system libs
-  │   ├── linux.rs        # 125 lines — FFmpeg source build, X11/VA-API/DRM libs
-  │   └── macos.rs        # 84 lines — FFmpeg source build, Apple framework libs
-  ```
-
-  **The dispatcher ([`build.rs`](../build.rs), 28 lines)**:
-  ```rust
-  #[path = "build/windows.rs"]
-  mod build_windows;
-  #[path = "build/linux.rs"]
-  mod build_linux;
-  #[path = "build/macos.rs"]
-  mod build_macos;
-  #[path = "build/common.rs"]
-  mod build_common;
-
-  use std::env;
-
-  fn main() {
-      let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-      if target_os == "windows" {
-          build_windows::build();
-      } else if target_os == "linux" {
-          build_linux::build();
-      } else if target_os == "macos" {
-          build_macos::build();
-      } else {
-          panic!("Unsupported target OS: {}", target_os);
-      }
-  }
-  ```
-
-  **Key design decisions in each module**:
-
-  | Module | Key Responsibility | Isolation Boundary |
-  | :--- | :--- | :--- |
-  | [`build/common.rs`](../build/common.rs) | `compile_typescript()` — uses `npx` on Windows, `tsc` on Unix. `compile_c_helpers()` — shared `cc::Build` with OS-conditional `#define` flags. | Called by each OS module explicitly. Changes here are visible to all OS targets — intentionally. |
-  | [`build/windows.rs`](../build/windows.rs) | Links `deps/prebuilt_windows/lib/*.lib`. Links Win32 system libs. **Does not contain any bash/shell/POSIX logic.** | Complete isolation. No `Command::new("bash")`. No `build_ffmpeg()`. No `clean.sh`. |
-  | [`build/linux.rs`](../build/linux.rs) | Calls `deps/build.sh` via bash. Compiles `lib/linux/uinput.c`, `xcapture.c`, `xhelper.c`. Links X11, VA-API, DRM libs. | Contains `build_ffmpeg()` and `resolve_bash()` — POSIX-only functions that Windows never sees. |
-  | [`build/macos.rs`](../build/macos.rs) | Calls `deps/build.sh` via bash. Links Apple frameworks (`VideoToolbox`, `CoreMedia`). | Contains its own `build_ffmpeg()` — identical structure to Linux but with macOS `dist_dir`. |
-
-  **What this solves**:
-  1. **Blast radius containment**: Editing `build/windows.rs` cannot affect `build/linux.rs` or `build/macos.rs`. They are separate files with separate function scopes.
-  2. **Safe deletion**: A Windows developer can freely modify or remove any function in `build/windows.rs` without risk to Linux/macOS pipelines.
-  3. **Clear ownership**: Community contributors working on Linux support know exactly which file to edit (`build/linux.rs`) without needing to understand Windows prebuilt logic.
-  4. **IDE safety**: Dead code warnings, auto-imports, and refactoring tools operate within file boundaries, reducing cross-contamination risk.
-  5. **Reviewability**: PRs that modify only Windows build logic touch only `build/windows.rs`, making code review targeted and safe.
-
-### 2. Remaining Risks & Mitigations
-
-Despite the modularization, there are still shared surfaces that require discipline:
-
-| Risk | Location | Mitigation |
-| :--- | :--- | :--- |
-| `build/common.rs` is shared by all OS modules | `compile_typescript()`, `compile_c_helpers()` | Changes to `common.rs` must be tested on all target OS (or at minimum, reviewed for OS-conditional branches). |
-| `Cargo.toml` dependency declarations are shared | `[dependencies]`, `[target.'cfg(...)'.dependencies]` | Use `[target.'cfg(target_os = "windows")'.dependencies]` for platform-specific crates. |
-| `build.rs` dispatcher itself is shared | `main()` function | Dispatcher is 28 lines with trivial logic — minimal surface area. |
-| TypeScript frontend (`ts/lib.ts`) is shared | 43KB of client-side code | Protocol-level changes must be coordinated with `protocol.rs`. Not a build system risk. |
-
-### 3. Engineering Lesson
-
-**Logical isolation is not structural isolation.** An `if/else` branch inside a single file creates a *logical* boundary — the code in each branch only executes on its target OS. But the *structural* boundary (blast radius for edits, IDE refactoring scope, code review surface, accidental deletion risk) remains the entire file.
-
-When two OS targets have **fundamentally different dependency models** (source compilation vs. prebuilt linking), they should live in **separate files** — not separate branches within the same file. The cost of maintaining separate files (some duplication of FFmpeg link lines) is vastly outweighed by the safety of knowing that a Windows-only change cannot silently break a Linux build.
-
-This principle is widely applied in production codebases:
-- Chromium: `build/config/win/`, `build/config/linux/`, `build/config/mac/` — separate GN configs per OS.
-- Firefox: `toolkit/moz.build` with platform-specific subdirectories.
-- Game engines (Unreal, Godot): Per-platform build scripts in `platform/windows/`, `platform/linux/`, etc.
-
-The Rust `#[path = "..."]` module attribute makes this pattern particularly clean — the dispatcher file stays minimal (28 lines) while each OS module is a fully self-contained compilation unit.
-
----
-
-## Chapter 8: Capability Layer Extraction — `common.rs` Semantic Separation
+## Chapter 6: Windows Native Build Environment Issues
 * **Investigated**: 2026-06-18
 * **Resolved**: 2026-06-18
-* **Status**: ✅ **Resolved.** `BuildCapabilities` struct introduced. `common.rs` now has zero `if target_os` branches.
-
-### 0. Background Context
-
-After modularizing `build.rs` into a dispatcher + per-OS modules (Chapter 7), the `build/common.rs` file retained OS-conditional logic. ChatGPT identified this as a "semantic leakage" problem — not a bug, but an **early architecture drift pattern** where three different concern classes were mixed in one file:
-
-| Concern Class | Example in `common.rs` |
-| :--- | :--- |
-| **Build orchestration** | Calling `cc::Build`, compiling C files |
-| **Capability detection** | `if target_os == "linux" { HAS_VAAPI }` |
-| **Environment assumption** | `if target_os == "windows" { cmd /c npx }` |
-
-The key insight: `common.rs` should not be asking "which OS am I on?" — that question belongs in the OS modules. `common.rs` should only be asking "what capabilities do I have?" and acting on them.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Any developer adding a new hardware encoder or build tool to the project. They would be forced to add an `if target_os ==` branch to `common.rs`, increasing the OS-awareness of a file that should be OS-neutral.
+* **Who is affected**: Windows developers compiling the project natively without relying on Linux virtualization layers (WSL).
 
 #### WHAT
-* **What was the issue**: `build/common.rs` contained 5 `if target_os == ...` branches:
-
-  ```rust
-  // BEFORE — common.rs asking "which OS am I?"
-  pub fn compile_typescript(target_os: &str) {
-      let mut tsc_command = if target_os == "windows" {  // ← OS detection
-          let mut cmd = Command::new("cmd");
-          cmd.args(&["/c", "npx -y -p typescript tsc"]);
-          cmd
-      } else {
-          Command::new("tsc")
-      };
-  }
-
-  pub fn compile_c_helpers(target_os: &str, dist_dir: &Path, enable_libnpp: bool) {
-      if ["linux", "windows"].contains(&target_os) {  // ← OS detection
-          cc_video.define("HAS_NVENC", None);
-      }
-      if target_os == "linux" {    // ← OS detection
-          cc_video.define("HAS_VAAPI", None);
-      }
-      if target_os == "macos" {   // ← OS detection
-          cc_video.define("HAS_VIDEOTOOLBOX", None);
-      }
-      if target_os == "windows" { // ← OS detection
-          cc_video.define("HAS_MEDIAFOUNDATION", None);
-      }
-  }
-  ```
+* **What is the issue**: `cargo check`/`cargo build` fails due to Git line-ending conversions (CRLF), Git Bash path hijacking, missing NASM assemblers, and LLVM-CUDA compilation failures.
 
 #### WHERE
-* **Where does it occur**: `build/common.rs` — the shared helper module called by all three OS build modules.
+* **Where does it occur**: Root compilation script `build.rs` and dependencies folder `deps/`.
 
 #### WHEN
-* **When did it become problematic**: From the moment it was created. The OS-conditional logic was necessary in the original monolith but should not have been carried into `common.rs` during the modularization refactor. ChatGPT identified this as a "garbage collector for cross-platform logic" and the most dangerous file in the build system.
+* **When is it triggered**: Initiated upon cargo build sequences on fresh Windows checkouts.
 
 #### WHY
-* **Root Cause (Semantic)**: The refactor from monolith → dispatcher preserved the structure of the logic but not its separation of concerns. The OS string `target_os: &str` was passed as a parameter to `common.rs` functions — this meant `common.rs` still "knew" about the OS and made decisions based on it.
-
-  The deeper issue is that **"which OS"** and **"what capabilities"** are different questions:
-  - "Which OS" = a string-based identity check, fragile and expandable
-  - "What capabilities" = a boolean declaration, stable and auditable
-
-  When `common.rs` asks "which OS", adding a new OS (e.g., FreeBSD, WASM) requires modifying `common.rs`. When `common.rs` asks "what capabilities", adding a new OS only requires adding a new OS module — `common.rs` is untouched.
+* **Why does it happen (Root Cause)**: Upstream build configurations assumed a standard POSIX system with bash launchers, executing scripts that crash under MSVC toolchains and CRLF character rules.
 
 #### HOW
-* **Implemented Solution**: Introduced `BuildCapabilities` struct. Each OS module **declares** its capabilities; `common.rs` **receives** them.
+* **How it was resolved**:
+  - Enforced LF line endings via Git configurations.
+  - Provided a precompiled static library archive under `deps/prebuilt_windows` for MSVC linking.
+  - Adapted TypeScript packaging triggers to invoke `npx` dynamically rather than requiring globally mapped compilation environments.
 
-  **New `BuildCapabilities` struct** (owned by `build/common.rs`, populated by OS modules):
+---
+
+## Chapter 7: Dual-Backend Dispatcher Architecture
+* **Investigated**: 2026-06-18
+* **Resolved**: 2026-06-18
+* **Status**: ✅ **Resolved.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: All developers and CI maintainers across Windows, Linux, and macOS platforms.
+
+#### WHAT
+* **What is the issue**: The root `build.rs` compile wrapper was a monolithic block of 300+ lines. Edits to target path configurations on Windows frequently introduced compilation regressions on POSIX platforms, creating a high maintenance blast radius.
+
+#### WHERE
+* **Where does it occur**: Root `build.rs` compile orchestrator.
+
+#### WHEN
+* **When is it triggered**: Triggered at every compilation launch.
+
+#### WHY
+* **Why does it happen (Root Cause)**: The project grew by appending OS conditional compilation switches (`cfg!(target_os)`) into a single file, failing to separate platform build pipelines.
+
+#### HOW
+* **How it was resolved**: Modularized the compilation system into discrete platform-specific submodules:
+  - `build.rs` (Thin dispatcher wrapper)
+  - `build/windows.rs` (Direct prebuilt library linker)
+  - `build/linux.rs` & `build/macos.rs` (FFmpeg compiler systems)
+  - `build/common.rs` (Universal TypeScript compiler & C bindings creator)
+
+---
+
+## Chapter 8: Capability Layer Extraction (`common.rs`)
+* **Investigated**: 2026-06-18
+* **Resolved**: 2026-06-18
+* **Status**: ✅ **Resolved.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Core engine developers adding platform features.
+
+#### WHAT
+* **What is the issue**: The shared helper script `build/common.rs` was heavily coupled to OS identity checks (`if target_os ==`), undermining the purpose of modular split-outs.
+
+#### WHERE
+* **Where does it occur**: `build/common.rs` core compilation functions.
+
+#### WHEN
+* **When is it triggered**: Executed on compilation routines.
+
+#### WHY
+* **Why does it happen (Root Cause)**: Platform-neutral logic was making concrete environmental assumptions (e.g., executing `/c npx` on Windows vs `tsc` on Linux) instead of checking abstract capabilities.
+
+#### HOW
+* **How it was resolved**: Implemented a flat `BuildCapabilities` struct that shifts OS-aware declarations to the OS-specific modules. `common.rs` now queries features strictly via flat properties without knowing which OS is active:
   ```rust
   pub struct BuildCapabilities {
       pub has_nvenc: bool,
@@ -578,166 +279,200 @@ The key insight: `common.rs` should not be asking "which OS am I on?" — that q
       pub has_videotoolbox: bool,
       pub has_mediafoundation: bool,
       pub has_libnpp: bool,
-      pub typescript_via_npx: bool,
   }
   ```
-
-  **New `common.rs` functions** — zero OS detection:
-  ```rust
-  pub fn compile_typescript(caps: &BuildCapabilities) {
-      let mut tsc_command = if caps.typescript_via_npx {
-          let mut cmd = Command::new("cmd");
-          cmd.args(&["/c", "npx -y -p typescript tsc"]);
-          cmd
-      } else {
-          Command::new("tsc")
-      };
-      // ...
-  }
-
-  pub fn compile_c_helpers(caps: &BuildCapabilities, dist_dir: &Path) {
-      if caps.has_nvenc        { cc_video.define("HAS_NVENC", None); }
-      if caps.has_vaapi        { cc_video.define("HAS_VAAPI", None); }
-      if caps.has_videotoolbox { cc_video.define("HAS_VIDEOTOOLBOX", None); }
-      if caps.has_mediafoundation { cc_video.define("HAS_MEDIAFOUNDATION", None); }
-      if caps.has_libnpp       { cc_video.define("HAS_LIBNPP", None); }
-  }
-  ```
-
-  **Each OS module now owns its capability declaration**:
-  ```rust
-  // build/windows.rs
-  let caps = BuildCapabilities {
-      has_nvenc: true, has_vaapi: false, has_videotoolbox: false,
-      has_mediafoundation: true, has_libnpp: enable_libnpp, typescript_via_npx: true,
-  };
-
-  // build/linux.rs
-  let caps = BuildCapabilities {
-      has_nvenc: true, has_vaapi: true, has_videotoolbox: false,
-      has_mediafoundation: false, has_libnpp: enable_libnpp, typescript_via_npx: false,
-  };
-
-  // build/macos.rs
-  let caps = BuildCapabilities {
-      has_nvenc: false, has_vaapi: false, has_videotoolbox: true,
-      has_mediafoundation: false, has_libnpp: enable_libnpp, typescript_via_npx: false,
-  };
-  ```
-
-  **Build verification**: `cargo check` passed in 2.26s with zero errors after the refactor.
-
-### 2. Engineering Lesson
-
-**"Which OS" and "what capabilities" are different questions that must live in different places.**
-
-When shared code asks "which OS am I on?", it becomes coupled to the OS taxonomy. Adding a new OS requires changing the shared code. When shared code asks "what capabilities do I have?", it is decoupled from OS identity. Adding a new OS means adding a new module — shared code is untouched.
-
-This pattern is called **capability-based abstraction** or **dependency inversion** — the shared layer depends on an abstraction (capabilities) rather than on concrete details (OS strings). It is the same principle behind Rust's trait system, Go's interface system, and SOLID's Dependency Inversion Principle.
-
-The `BuildCapabilities` struct also provides an additional benefit: it is **self-documenting**. Reading the struct declaration in a Windows, Linux, or macOS module tells you exactly what hardware encoders and tools are available on that platform — without needing to know anything about the build system internals.
 
 ---
 
-## Chapter 9: Flat Typed Build Capabilities — Abstraction Freeze
+## Chapter 9: Flat Typed Build Capabilities
 * **Investigated**: 2026-06-19
 * **Resolved**: 2026-06-19
-* **Status**: ✅ **Resolved.** Flat typed capability contract implemented. Build system abstraction frozen.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Any future contributor working on the Weylus Studio build system or target-specific tools.
-* **Who identified the issue**: ChatGPT acting as architectural advisor, noting the risk of "capability/nested abstraction creep" converting the build script into a complex platform ontology or configuration framework.
+* **Who is affected**: Build system maintainers.
 
 #### WHAT
-* **What was the issue**: Evolving the boolean `BuildCapabilities` into a deeply nested structure (e.g. `VideoCapabilities` + `ToolchainCapabilities` + `BuildOptions`) creates a "false sense of correctness" and introduces cognitive tax for simple build-time orchestration. It risks bloating the build script into a custom DSL framework rather than a minimal helper.
+* **What is the issue**: Risk of nested capability struct creep converting compile script code into an over-engineered framework ontology.
 
 #### WHERE
-* **Where does it occur**: `build/common.rs`, `build/windows.rs`, `build/linux.rs`, and `build/macos.rs`.
+* **Where does it occur**: `build/common.rs`.
 
 #### WHEN
-* **When is it triggered**: During compilation (`cargo check`, `cargo build`).
-* **When did it become critical**: Right after extracting capabilities from `common.rs`. The flat boolean flags were simple but lacked type-safety for toolchain checks (e.g. using `typescript_via_npx` boolean flag instead of a clean, typed enum indicating tsc resolution). The temptation was to build a nested configuration domain model, which would over-engineer the build layer.
+* **When is it triggered**: Active during development iterations of capability properties.
 
 #### WHY
-* **Root Cause**: Build systems are fundamentally simple, build-time only scripts. Introducing nested structures and domain modeling increases the maintenance barrier. A flat capability layout with targeted enums (like `TypeScriptCompilerSource`) is the optimal sweet spot between logical simplicity and type safety.
+* **Why does it happen (Root Cause)**: Flat booleans were simple but lacked type-safety. However, structuring nested objects creates structural overhead that is unnecessary for build-time compilation.
 
 #### HOW
-* **Implemented Solution**:
-  1. Kept the `BuildCapabilities` struct completely flat, maintaining simplicity.
-  2. Replaced the boolean `typescript_via_npx` flag with a typed enum `typescript: TypeScriptCompilerSource` to make the TypeScript toolchain invocation clean, deterministic, and type-safe.
-  3. Added Rule 7, Rule 8, and Rule 9 to `docs/CONSTRAINTS.md` to prevent compilation-time `BuildCapabilities` from leaking into runtime code (`src/`) and to freeze the nesting depth of capabilities.
-
-### 2. Engineering Lesson
-
-**Over-shaping an abstraction in build scripts is an anti-pattern.**
-
-A clean build system must be minimal, flat, and declarative. Strive to map platform facts to compile-time variables without introducing complex domain structures. Adding layers of nested types (e.g. separating capabilities vs options vs configs) inside a pre-compilation script creates a parallel architecture that raises the barrier to contribution. When typing build variables, keep the container struct flat and freeze its evolution depth.
+* **How it was resolved**: Locked the capability architecture to a flat typed structure, replacing boolean flags with simple typed enums (such as `TypeScriptCompilerSource`) and added structural safety rules in [[CONSTRAINTS]].
 
 ---
 
 ## Chapter 10: Frame Pacing & Timing Resolution
 * **Investigated**: 2026-06-19
 * **Resolved**: 2026-06-19
-* **Status**: ✅ **Resolved.** Frame pacing migrated to microsecond precision and capture boundary timestamped.
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**: Windows users who notice micro-stuttering or minor jitter in the mirrored screen on the tablet, even when the network connection is strong and encoder latency is low.
+* **Who is affected**: Windows drawing tablet clients experiencing minor micro-stutters or presentation timeline jitter.
 
 #### WHAT
-* **What was the issue**: The video encoding loop utilized millisecond timing resolution (`.as_millis()`) to track packet display times and pacing intervals. Under Windows' Desktop Window Manager (DWM) compositor and thread scheduler, millisecond precision is too coarse. Frame intervals were inconsistent, causing visible micro-stuttering.
+* **What is the issue**: Mirrored screens stuttered because presentation timelines used milliseconds (`.as_millis()`), which is too coarse under DWM scheduling models. Additionally, frames were timestamped after capture, baking CPU delays into video playback.
 
 #### WHERE
-* **Where does it occur**: `src/video.rs` (calculating relative frame presentation timestamps) and `lib/encode_video.c` (passing PTS to FFmpeg).
+* **Where does it occur**: `src/video.rs` and `src/websocket.rs`.
 
 #### WHEN
-* **When is it triggered**: During active drawing or screen mirroring where precise, smooth frame delivery is critical.
+* **When is it triggered**: Active during real-time screen streaming.
 
 #### WHY
-* **Root Cause**: Two issues:
-  1. Coarse millisecond timing granularity in the video stream base time resulted in quantization jitter.
-  2. Stamping frames after capture was complete meant encoding latency and thread scheduling delays were baked directly into the video timeline, causing jitter in frame presentation times.
+* **Why does it happen (Root Cause)**: Coarse timing intervals coupled with encoding scheduling jitter disrupted video stream pacing.
 
 #### HOW
-* **Resolution**:
-  1. **Microsecond Resolution**: Refactored the `TIME_BASE` denominator in `lib/encode_video.c` from `1000` to `1000000` (microseconds).
-  2. **i64 timestamps**: Changed the C/FFI parameter signature in `encode_video_frame` from `int millis` to `int64_t pts` to support microsecond timestamps without the 35-minute overflow limitation.
-  3. **Capture Boundary Decoupling**: Moved the timestamping clock in `src/websocket.rs` immediately *before* calling `recorder.capture()`. The calculated presentation timestamp is based on the moment of capture, shielding the timeline from downstream CPU encoding jitter.
+* **How it was resolved**:
+  - Upgraded video presentation timing base to **microseconds** (`1,000,000` base).
+  - Modified FFI signatures to use `int64_t pts`.
+  - Moved timestamp generation directly to the **capture boundary** (immediately before calling `recorder.capture()`), isolating visual playback pacing from CPU/GPU encoding overhead.
 
-### 2. Engineering Lesson
-
-In video streaming systems, timestamps must reflect the **logical moment of capture**, not the physical moment of submission to the encoder. Moving the timestamp boundary upstream decouples presentation timeline calculations from downstream resource contention (such as CPU/GPU encode spikes). Additionally, temporal resolution must match or exceed the compositor scheduling slice (microseconds) to prevent pacing quantization.
+$$\text{PTS}_{\text{frame}} = \text{Time}_{\text{capture\_boundary}} - \text{Time}_{\text{stream\_start}}$$
 
 ---
 
-## Chapter 11: Investigation — Community Patches (PR #290 & #291) Integration
-* **Investigated**: 2026-06-19
-* **Status**: Needs verification.
+## Chapter 11: Build Pipeline & Virtual Keyboard Serialization
+* **Investigated**: 2026-06-21
+* **Resolved**: 2026-06-21
+* **Status**: ✅ **Resolved.**
 
 ### 1. 5W+1H Diagnostic Matrix
 
 #### WHO
-* **Who is affected**:
-  - Stylus users drawing on High-DPI screens under Windows whose inputs are offset from the visual cursor (PR #290).
-  - Tablet users who need to reconnect their session without reloading the web page, or who need to send virtual keyboard strokes (PR #291).
+* **Who is affected**: Developers building the system and tablet users who require type-safe virtual key shortcut custom mappings.
 
 #### WHAT
-* **What is the issue**: Weylus CE contains two high-demand community PRs that were never merged upstream:
-  1. **PR #290 (Click-to-reconnect + HiDPI coordinates)**: Fixes a known offset discrepancy where Windows display scaling shifts coordinates relative to the screen dimensions, and implements reconnect button.
-  2. **PR #291 (Virtual keyboard)**: Restores the ability to toggle an on-screen keyboard on the client side.
+* **What is the issue**: 
+  - **Build compiler side-effects**: Cargo compilation loops initiated redundant `npm install` tasks, causing high compile latencies. Command invocations on Windows also failed due to shell wrapper differences.
+  - **Type safety loss**: Virtual keyboard settings were transmitted over WebSocket as loose, typeless raw String variables (`profiles: String`). This increased coordinate mapping failures and was highly error-prone.
 
 #### WHERE
-* **Where does it occur**: The frontend TypeScript (`ts/lib.ts`) and HTML modules (`www/`), and the coordinate receiver on the Rust server (`src/websocket.rs`).
+* **Where does it occur**: Build script configuration files (`build/common.rs` and platform modules) and networking/protocol models (`src/protocol.rs`, `src/websocket.rs`, `src/config.rs`).
 
 #### WHEN
-* **When is it triggered**: When connecting a client tablet to a Windows host with display scale factor > 100%, or when the client tablet experiences connection drops.
+* **When is it triggered**: During build execution (`cargo check` or `cargo build`) and during runtime keyboard layout profile loading/saving processes.
 
 #### WHY
-* **Root Cause**: The original Weylus was written before Windows HiDPI coordinate scaling was fully verified, resulting in coordinates being mapped to physical pixels rather than logical pixels. The upstream repo ceased merging active community PRs due to merge conflicts and lack of developer testing.
+* **Why does it happen (Root Cause)**:
+  - The build script mixed package management side-effects with compilation, failing to halt explicitly when dependencies were missing.
+  - The communication layer relied on raw string payloads to handle key profiles, creating technical debt and forcing serialization logic inside net transport loops.
 
 #### HOW
-* **Proposed Action**: Create clean feature branches for these patches. Resolve merge conflicts in `ts/lib.ts`, test coordinate translation on Windows machines with scaling (e.g. 125%, 150%), and integrate the frontend/backend support safely.
+* **How it was resolved (Code Comparison)**:
+  - **Deterministic Build script**: Renamed compilation to `build_web_client` and removed auto-install. Added assertion panics if `node_modules` is missing:
+    ```rust
+    // BEFORE (unstable, side-effect prone):
+    // Spinned cmd /c npm install dynamically during cargo check.
+    
+    // AFTER (clean, explicit):
+    if !node_modules.exists() {
+        panic!("www/node_modules missing. Run npm install first.");
+    }
+    ```
+  - **Direct Command fallback**: Configured direct call logic for Windows MSVC to invoke `npm.cmd` / `pnpm.cmd` dynamically without shell wrappers.
+  - **Type-Safe Serialization structures**: Created clean `VirtualKey` and `VirtualKeyProfile` structs:
+    ```rust
+    // BEFORE:
+    // SetVirtualKeysProfiles { profiles: String }
+    
+    // AFTER:
+    pub struct VirtualKey {
+        pub label: String,
+        pub key_code: u16,
+    }
+    pub struct VirtualKeyProfile {
+        pub name: String,
+        pub keys: Vec<VirtualKey>,
+    }
+    ```
+  - **Domain Extraction**: Built a dedicated module `src/virtual_keys.rs` to persist configurations cleanly, decoupling `src/websocket.rs` from serialization and IO storage details.
 
+---
+
+## Chapter 12: Evolving to Modular Multi-Device Platform
+* **Investigated**: 2026-06-21
+* **Status**: 🚀 **Vision Defined.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Professional digital artists, creators, and developers seeking zero-latency multi-display drawing workflows.
+
+#### WHAT
+* **What is the issue**: Weylus originally operated as a generic web server accessed via a browser client. Browser engines impose performance bottlenecks (lack of direct Vulkan access, coarse pointer event loop scheduling, and VSync limits), preventing stable 120 FPS performance.
+
+#### WHERE
+* **Where does it occur**: Client-side application layer.
+
+#### WHEN
+* **When is it triggered**: Active when mirroring and drawing on high refresh-rate screens (90Hz, 120Hz, 144Hz).
+
+#### WHY
+* **Why does it happen (Root Cause)**: Browser execution engines add scheduling layers that introduce latency. Additionally, WiFi connections introduce jitter and packet dropouts.
+
+#### HOW
+* **Proposed Action**:
+  - Migrate client target to a native Android application written in **Kotlin + Jetpack Compose**.
+  - Direct hardware decoding via Android `MediaCodec` into a native `SurfaceView`.
+  - Establish **USB Cable Connectivity** via automatic ADB reverse port forwarding, bypassing WiFi completely.
+  - Achieve a target of **120 FPS** with ultra-low latency:
+
+$$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} + T_{\text{USB\_transfer}} + T_{\text{decode}} + T_{\text{render}} < 8\,\text{ms}$$
+
+---
+
+## Chapter 13: Build Decoupling & Configuration Fallback Safety
+* **Investigated**: 2026-07-03
+* **Resolved**: 2026-07-03
+* **Status**: ✅ **Resolved.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Developers compiling Weylus Studio across multiple OS environments, and users saving keyboard profiles without prior config file creation.
+
+#### WHAT
+* **What is the issue**:
+  1. The shared compilation module `build/common.rs` used hardcoded `cfg!(target_os = "windows")` switches for compiler invocations, violating the decoupled capabilities architecture model.
+  2. Cargo did not recursively watch TypeScript/SASS source files inside `www/src/`, which resulted in stale embedded web assets unless `cargo clean` was manually run.
+  3. Saving keyboard shortcuts via `save_profiles` in `src/virtual_keys.rs` failed silently if the global `weylus.toml` config file was not yet present.
+
+#### WHERE
+* **Where does it occur**: Compile-time build scripts (`build/common.rs`, `build/windows.rs`, `build/linux.rs`, `build/macos.rs`) and configuration persistence (`src/virtual_keys.rs`).
+
+#### WHEN
+* **When is it triggered**: Run at every cargo build iteration, and during runtime keyboard profile operations.
+
+#### WHY
+* **Why does it happen (Root Cause)**:
+  - Hardcoded OS gating inside common helpers breaks the clean separation of concerns.
+  - Cargo's default directory monitoring only checks directory metadata updates instead of contents.
+  - Fallback logic to build default configurations was missing.
+
+#### HOW
+* **How it was resolved**:
+  - Injected `shell` and `shell_flag` into the `BuildCapabilities` struct so that OS-specific build dispatchers own their tool invocation wrappers.
+  - Configured `std::fs::read_dir` inside `build_web_client` to output recursive `cargo:rerun-if-changed` triggers for all files in `www/src/`.
+  - Upgraded `save_profiles` to fallback to a default `Config` struct instance via `unwrap_or_else` if no config file is found:
+    ```rust
+    let mut config = read_config().unwrap_or_else(|| {
+        crate::config::Config {
+            access_code: None,
+            bind_address: std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+            web_port: 1701,
+            // ... all fields populated with safe defaults ...
+        }
+    });
+    ```

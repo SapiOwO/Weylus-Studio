@@ -137,6 +137,17 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
                                 }
                             });
                         }
+                        MessageInbound::RequestVirtualKeysProfiles => {
+                            let profiles = crate::virtual_keys::load_profiles();
+                            self.send_message(MessageOutbound::VirtualKeysProfiles { profiles });
+                        }
+                        MessageInbound::SetVirtualKeysProfiles { profiles } => {
+                            if let Err(err) = crate::virtual_keys::save_profiles(&profiles) {
+                                warn!("Failed to save virtual key profiles: {}", err);
+                            }
+                            // Broadcast the updated profiles back to the client to confirm
+                            self.send_message(MessageOutbound::VirtualKeysProfiles { profiles });
+                        }
                     }
                 }
                 Err(err) => {
