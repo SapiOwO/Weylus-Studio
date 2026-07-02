@@ -10,6 +10,7 @@ pub struct CError {
     error_str: [c_char; 1024],
 }
 
+#[allow(dead_code)]
 pub enum CErrorCode {
     NoError,
     GenericError,
@@ -28,10 +29,12 @@ impl CError {
         self.code != 0
     }
 
+    #[allow(dead_code)]
     pub fn code(&self) -> i32 {
         self.code as i32
     }
 
+    #[allow(dead_code)]
     pub fn to_enum(&self) -> CErrorCode {
         match self.code {
             0 => CErrorCode::NoError,

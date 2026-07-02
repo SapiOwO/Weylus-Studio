@@ -11,7 +11,7 @@ use clap_complete::generate;
 use signal_hook::iterator::Signals;
 #[cfg(unix)]
 use signal_hook::{consts::TERM_SIGNALS, low_level::signal_name};
-use tracing::{error, info, warn};
+use tracing::warn;
 
 use std::sync::mpsc;
 

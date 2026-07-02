@@ -1,15 +1,12 @@
 use std::cmp::min;
-use std::io::Cursor;
-use std::iter::Iterator;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::AtomicBool;
 
 use fltk::app;
 use fltk::enums::{FrameType, LabelType};
-use fltk::image::PngImage;
 use fltk::menu::Choice;
 use std::sync::{mpsc, Arc, Mutex};
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use fltk::{
     app::{awake_callback, App},
@@ -271,6 +268,7 @@ pub fn run(config: &Config, log_receiver: mpsc::Receiver<String>) {
 
                 write_config(&config);
 
+                #[allow(unused_mut)]
                 let mut web_sock = SocketAddr::new(config.bind_address, config.web_port);
 
                 #[cfg(not(target_os = "windows"))]

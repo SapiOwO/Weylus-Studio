@@ -3,11 +3,11 @@ use autopilot::mouse;
 use autopilot::mouse::ScrollDirection;
 use autopilot::screen::size as screen_size;
 
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::input::device::{InputDevice, InputDeviceType};
 use crate::protocol::{
-    Button, KeyboardEvent, KeyboardEventType, PointerEvent, PointerEventType, PointerType,
+    Button, KeyboardEvent, KeyboardEventType, PointerEvent, PointerType,
     WheelEvent,
 };
 
@@ -17,14 +17,14 @@ use crate::capturable::{Capturable, Geometry};
 use super::macos_tablet::{MacosPenEventType, macos_send_tablet_event};
 
 pub struct AutoPilotDevice {
-    tablet_down: bool,
+    _tablet_down: bool,
     capturable: Box<dyn Capturable>,
 }
 
 impl AutoPilotDevice {
     pub fn new(capturable: Box<dyn Capturable>) -> Self {
         Self {
-            tablet_down: false,
+            _tablet_down: false,
             capturable,
         }
     }

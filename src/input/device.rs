@@ -1,6 +1,7 @@
 use crate::capturable::Capturable;
 use crate::protocol::{KeyboardEvent, PointerEvent, WheelEvent};
 
+#[allow(dead_code)]
 #[derive(PartialEq, Eq)]
 pub enum InputDeviceType {
     AutoPilotDevice,
@@ -14,5 +15,6 @@ pub trait InputDevice {
     fn send_pointer_event(&mut self, event: &PointerEvent);
     fn send_keyboard_event(&mut self, event: &KeyboardEvent);
     fn set_capturable(&mut self, capturable: Box<dyn Capturable>);
+    #[allow(dead_code)]
     fn device_type(&self) -> InputDeviceType;
 }

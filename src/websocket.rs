@@ -10,13 +10,12 @@ use tokio::sync::mpsc::channel;
 use tracing::{debug, error, trace, warn};
 
 use crate::capturable::{get_capturables, Capturable, Recorder};
-use crate::input::device::{InputDevice, InputDeviceType};
+use crate::input::device::InputDevice;
 use crate::protocol::{
     ClientConfiguration, KeyboardEvent, MessageInbound, MessageOutbound, PointerEvent,
     WeylusReceiver, WeylusSender, WheelEvent,
 };
 
-use crate::cerror::CErrorCode;
 use crate::video::{EncoderOptions, VideoEncoder};
 
 struct VideoConfig {
@@ -49,6 +48,7 @@ pub struct WeylusClientHandler<S, R, FnUInput> {
     video_sender: mpsc::Sender<VideoCommands>,
     input_device: Option<Box<dyn InputDevice>>,
     capturables: Vec<Box<dyn Capturable>>,
+    #[allow(dead_code)]
     on_uinput_inaccessible: FnUInput,
     config: WeylusClientConfig,
     #[cfg(target_os = "linux")]
@@ -223,7 +223,7 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
         S: WeylusSender,
         FnUInput: Fn(),
     {
-        let client_name_changed = if self.client_name != config.client_name {
+        let _client_name_changed = if self.client_name != config.client_name {
             self.client_name = config.client_name;
             true
         } else {

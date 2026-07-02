@@ -1,6 +1,5 @@
 use std::boxed::Box;
 use std::error::Error;
-use tracing::warn;
 
 #[cfg(target_os = "macos")]
 pub mod core_graphics;
