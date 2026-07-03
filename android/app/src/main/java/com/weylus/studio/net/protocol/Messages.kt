@@ -3,6 +3,13 @@ package com.weylus.studio.net.protocol
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class DisplayChanged(
+    val width: Int,
+    val height: Int,
+    val rotation: Int
+)
+
+@Serializable
 data class MessageInbound(
     val type: String,
     
@@ -24,5 +31,10 @@ data class MessageInbound(
     val y: Double? = null,
     val pressure: Float? = null,
     val tilt_x: Float? = null,
-    val tilt_y: Float? = null
+    val tilt_y: Float? = null,
+
+    // DisplayChanged fields
+    val width: Int? = null,
+    val height: Int? = null,
+    val rotation: Int? = null
 )

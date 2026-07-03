@@ -6,12 +6,12 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.view.Surface
 import android.util.Log
-import java.nio.ByteBuffer
 
 class MediaCodecDecoder : VideoDecoder {
     private var codec: MediaCodec? = null
     private var isConfigured = false
     private var listener: DecoderListener? = null
+    private var scheduler: FrameScheduler? = null
     private var renderHandlerThread: HandlerThread? = null
     private var renderHandler: Handler? = null
     private var decodingRunning = false
@@ -20,13 +20,23 @@ class MediaCodecDecoder : VideoDecoder {
         get() = CodecType.H264_AVC
 
     override fun configure(surface: Surface, width: Int, height: Int, listener: DecoderListener) {
+        // Fallback overload
+    }
+
+    fun configure(
+        surface: Surface,
+        width: Int,
+        height: Int,
+        scheduler: FrameScheduler,
+        listener: DecoderListener
+    ) {
         this.listener = listener
+        this.scheduler = scheduler
         try {
             val format = MediaFormat.createVideoFormat("video/avc", width, height)
             
-            // Low latency configurations
             format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            format.setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
+            format.setInteger(MediaFormat.KEY_PRIORITY, 0)
             
             codec = MediaCodec.createDecoderByType("video/avc").apply {
                 configure(format, surface, null, 0)
@@ -34,6 +44,7 @@ class MediaCodecDecoder : VideoDecoder {
             }
             
             isConfigured = true
+            this.scheduler?.start()
             startDecodingLoop()
         } catch (e: Exception) {
             listener.onError(e)
@@ -69,14 +80,20 @@ class MediaCodecDecoder : VideoDecoder {
                 override fun run() {
                     if (!decodingRunning) return
                     val activeCodec = codec
-                    if (activeCodec != null) {
+                    if (activeCodec != null && isConfigured) {
                         try {
                             val bufferInfo = MediaCodec.BufferInfo()
                             val outputBufferId = activeCodec.dequeueOutputBuffer(bufferInfo, 2000)
                             if (outputBufferId >= 0) {
-                                // Release with render = true draws the frame onto the Surface immediately
-                                activeCodec.releaseOutputBuffer(outputBufferId, true)
-                                listener?.onFrameDecoded(bufferInfo.presentationTimeUs)
+                                // Delegate render callback to FrameScheduler instead of direct rendering
+                                scheduler?.onFrameAvailable(bufferInfo.presentationTimeUs) {
+                                    try {
+                                        activeCodec.releaseOutputBuffer(outputBufferId, true)
+                                        listener?.onFrameDecoded(bufferInfo.presentationTimeUs)
+                                    } catch (e: Exception) {
+                                        Log.e("MediaCodecDecoder", "Error releasing buffer on render: ${e.message}")
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
                             Log.e("MediaCodecDecoder", "Error dequeuing output buffer: ${e.message}")
@@ -100,6 +117,7 @@ class MediaCodecDecoder : VideoDecoder {
 
     override fun release() {
         decodingRunning = false
+        scheduler?.stop()
         renderHandlerThread?.quitSafely()
         try {
             codec?.stop()

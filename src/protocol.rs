@@ -1,6 +1,20 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct DisplayCapability {
+    pub width: i32,
+    pub height: i32,
+    pub refresh_rate: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DisplayChanged {
+    pub width: i32,
+    pub height: i32,
+    pub rotation: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ClientCapabilities {
     #[serde(default)]
     pub virtual_keyboard: bool,
@@ -12,6 +26,8 @@ pub struct ClientCapabilities {
     pub clipboard: bool,
     #[serde(default)]
     pub pressure: bool,
+    #[serde(default)]
+    pub display: Option<DisplayCapability>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -52,6 +68,7 @@ pub enum MessageInbound {
     ChooseCustomInputAreas,
     RequestVirtualKeysProfiles,
     SetVirtualKeysProfiles { profiles: Vec<VirtualKeyProfile> },
+    DisplayChanged(DisplayChanged),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

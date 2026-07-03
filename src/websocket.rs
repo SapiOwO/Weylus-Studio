@@ -145,6 +145,9 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
                             // Broadcast the updated profiles back to the client to confirm
                             self.send_message(MessageOutbound::VirtualKeysProfiles { profiles });
                         }
+                        MessageInbound::DisplayChanged(event) => {
+                            debug!("Client display changed: {:?}", event);
+                        }
                     }
                 }
                 Err(err) => {

@@ -14,9 +14,10 @@ interface SessionListener {
 enum class SessionState {
     DISCONNECTED,
     CONNECTING,
-    HANDSHAKING,
-    CONNECTED,
-    RECONNECTING
+    NEGOTIATING,
+    STREAMING,
+    RECOVERING,
+    DISCONNECTING
 }
 
 class Session(
@@ -27,22 +28,29 @@ class Session(
     private var state = SessionState.DISCONNECTED
     private var host: String = "127.0.0.1"
     private var port: Int = 1701
+    private var capabilities: ClientCapabilities? = null
 
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
 
-    fun start(host: String, port: Int, listener: SessionListener) {
+    fun start(
+        host: String,
+        port: Int,
+        capabilities: ClientCapabilities,
+        listener: SessionListener
+    ) {
         this.listener = listener
         this.host = host
         this.port = port
+        this.capabilities = capabilities
         updateState(SessionState.CONNECTING)
         transport.connect(host, port, this)
     }
 
     fun sendPointerEvent(event: PointerEvent) {
-        if (state != SessionState.CONNECTED) return
+        if (state != SessionState.STREAMING) return
         val msg = MessageInbound(
             type = "PointerEvent",
             is_primary = event.is_primary,
@@ -58,7 +66,20 @@ class Session(
         transport.sendText(text)
     }
 
+    fun sendDisplayChanged(width: Int, height: Int, rotation: Int) {
+        if (state != SessionState.STREAMING) return
+        val msg = MessageInbound(
+            type = "DisplayChanged",
+            width = width,
+            height = height,
+            rotation = rotation
+        )
+        val text = json.encodeToString(msg)
+        transport.sendText(text)
+    }
+
     fun stop() {
+        updateState(SessionState.DISCONNECTING)
         transport.disconnect()
         updateState(SessionState.DISCONNECTED)
     }
@@ -69,14 +90,7 @@ class Session(
     }
 
     override fun onConnected() {
-        updateState(SessionState.HANDSHAKING)
-        val caps = ClientCapabilities(
-            virtual_keyboard = true,
-            uinput = true,
-            hover = true,
-            clipboard = true,
-            pressure = true
-        )
+        updateState(SessionState.NEGOTIATING)
         val handshake = MessageInbound(
             type = "ClientConfiguration",
             uinput_support = true,
@@ -86,23 +100,23 @@ class Session(
             max_height = 1080,
             client_name = clientName,
             frame_rate = 60.0,
-            capabilities = caps
+            capabilities = capabilities
         )
         val text = json.encodeToString(handshake)
         transport.sendText(text)
     }
 
     override fun onDisconnected(reason: String?) {
-        if (state == SessionState.CONNECTED || state == SessionState.HANDSHAKING) {
-            updateState(SessionState.RECONNECTING)
+        if (state == SessionState.STREAMING || state == SessionState.NEGOTIATING) {
+            updateState(SessionState.RECOVERING)
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                if (state == SessionState.RECONNECTING) {
+                if (state == SessionState.RECOVERING) {
                     transport.connect(host, port, this)
                 }
             }, 2000)
-        } else if (state == SessionState.RECONNECTING) {
+        } else if (state == SessionState.RECOVERING) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                if (state == SessionState.RECONNECTING) {
+                if (state == SessionState.RECOVERING) {
                     transport.connect(host, port, this)
                 }
             }, 2000)
@@ -113,16 +127,16 @@ class Session(
     }
 
     override fun onBinaryMessageReceived(bytes: ByteArray) {
-        if (state == SessionState.HANDSHAKING) {
-            updateState(SessionState.CONNECTED)
+        if (state == SessionState.NEGOTIATING) {
+            updateState(SessionState.STREAMING)
         }
         listener?.onVideoFrameReceived(bytes)
     }
 
     override fun onTextMessageReceived(text: String) {
         try {
-            if (state == SessionState.HANDSHAKING) {
-                updateState(SessionState.CONNECTED)
+            if (state == SessionState.NEGOTIATING) {
+                updateState(SessionState.STREAMING)
             }
         } catch (e: Exception) {
             listener?.onError("Failed to parse text message: ${e.message}")
