@@ -514,3 +514,38 @@ $$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} +
     adb reverse tcp:<port> tcp:<port>
     ```
     This bridges the connection over the USB cable instantly.
+
+---
+
+## Chapter 15: OS Decoupling & Unified Wire Protocol
+* **Investigated**: 2026-07-03
+* **Resolved**: 2026-07-03
+* **Status**: ✅ **Resolved.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Future multi-platform clients (such as the Native Android Kotlin Client) connecting to servers on different OS targets, and developers maintaining the cross-platform code compilation.
+
+#### WHAT
+* **What is the issue**:
+  1. **OS-Dependent Wire Protocol**: The WebSocket `ClientConfiguration` structure had an OS-conditional field `uinput_support` gated with `#[cfg(target_os = "linux")]`, causing different JSON shapes depending on the server host OS.
+  2. **Asymmetric Enum Gating**: `InputDeviceType::WindowsInput` was platform-gated on Windows, but the Linux-only `UInputDevice` variant was left ungated, causing compilation warnings and asymmetry.
+  3. **Platform-Conditional get_capturables**: The `get_capturables` function accepted arguments only on Linux, necessitating inline conditional compilation directives at all call sites.
+
+#### WHERE
+* **Where does it occur**: Wire protocol format (`src/protocol.rs`), input device enumeration (`src/input/device.rs`), capture helpers (`src/capturable/mod.rs`), and server/websocket logic (`src/websocket.rs`, `src/weylus.rs`).
+
+#### WHEN
+* **When is it triggered**: Active at client WebSocket handshake initialization, capturable list querying, and device initialization.
+
+#### WHY
+* **Why does it happen (Root Cause)**:
+  - Gating fields in wire format structs based on compile-time target OS attributes creates runtime API drift across platforms.
+  - Divergent helper signatures force conditional complexity onto caller code.
+
+#### HOW
+* **How it was resolved**:
+  - **Universal Wire Protocol**: Removed `#[cfg]` gating from `uinput_support` in `ClientConfiguration` so that it parses unconditionally. Introduced `ClientCapabilities` with `#[serde(default)]` support to provide a scalable way for future native clients to advertise capabilities like pressure, hover, and virtual keyboards.
+  - **Symmetric Enum Gating**: Applied `#[cfg(target_os = "linux")]` to `InputDeviceType::UInputDevice` to align with the Windows variant.
+  - **Universal Helper Signature**: Unified `get_capturables` to take `wayland_support: bool` and `capture_cursor: bool` on all platforms, discarding them on non-Linux hosts to keep call sites clean and free of macro switches.

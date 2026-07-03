@@ -5,6 +5,7 @@ use crate::protocol::{KeyboardEvent, PointerEvent, WheelEvent};
 #[derive(PartialEq, Eq)]
 pub enum InputDeviceType {
     AutoPilotDevice,
+    #[cfg(target_os = "linux")]
     UInputDevice,
     #[cfg(target_os = "windows")]
     WindowsInput,

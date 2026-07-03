@@ -63,10 +63,15 @@ impl Clone for Box<dyn Capturable> {
 }
 
 pub fn get_capturables(
-    #[cfg(target_os = "linux")] wayland_support: bool,
-    #[cfg(target_os = "linux")] capture_cursor: bool,
+    wayland_support: bool,
+    capture_cursor: bool,
 ) -> Vec<Box<dyn Capturable>> {
     let mut capturables: Vec<Box<dyn Capturable>> = vec![];
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = wayland_support;
+        let _ = capture_cursor;
+    }
     #[cfg(target_os = "linux")]
     {
         if wayland_support {

@@ -51,7 +51,6 @@ pub struct WeylusClientHandler<S, R, FnUInput> {
     #[allow(dead_code)]
     on_uinput_inaccessible: FnUInput,
     config: WeylusClientConfig,
-    #[cfg(target_os = "linux")]
     capture_cursor: bool,
     client_name: Option<String>,
     video_thread: JoinHandle<()>,
@@ -60,7 +59,6 @@ pub struct WeylusClientHandler<S, R, FnUInput> {
 #[derive(Clone, Copy)]
 pub struct WeylusClientConfig {
     pub encoder_options: EncoderOptions,
-    #[cfg(target_os = "linux")]
     pub wayland_support: bool,
     pub no_gui: bool,
 }
@@ -92,7 +90,6 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
             capturables: vec![],
             on_uinput_inaccessible,
             config,
-            #[cfg(target_os = "linux")]
             capture_cursor: false,
             client_name: None,
             video_thread,
@@ -207,9 +204,7 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
     {
         let mut windows = Vec::<String>::new();
         self.capturables = get_capturables(
-            #[cfg(target_os = "linux")]
             self.config.wayland_support,
-            #[cfg(target_os = "linux")]
             self.capture_cursor,
         );
         self.capturables.iter().for_each(|c| {

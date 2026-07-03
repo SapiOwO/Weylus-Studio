@@ -39,10 +39,11 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 * **5W+1H Standardization**: Unified all case studies into a comprehensive document using the 5W+1H template. See [[CASE_STUDIES]].
 * **Defined Native 120 FPS Vision**: Detailed the transition from web server rendering to a native Kotlin Android application utilizing USB tethering to break performance boundaries.
 
-### July 3, 2026 — Build Decoupling & Configuration Fallback
-* **Refactored common.rs**: Removed all platform detection `cfg!(target_os)` checks from the TS compiler by introducing `shell` and `shell_flag` in `BuildCapabilities`.
-* **Recursive Cargo Tracking**: Configured Cargo to track all source files inside `www/src` recursively, preventing stale client assets.
-* **Safety Configuration Fallback**: Fixed a silent failure where virtual key profiles could not be saved if the initial `weylus.toml` config file was missing.
+### July 3, 2026 — OS Decoupling, Unified Wire Protocol & Client Capabilities
+* **Universal JSON Wire Format**: Removed `#[cfg(target_os = "linux")]` from `uinput_support` in `ClientConfiguration` to ensure a platform-neutral WebSocket protocol.
+* **ClientCapabilities Struct**: Added an extensible `ClientCapabilities` container supporting `virtual_keyboard`, `uinput`, `hover`, `clipboard`, and `pressure` flags for future Native Android client handshake.
+* **Platform Gating Symmetry**: Gated `InputDeviceType::UInputDevice` with `#[cfg(target_os = "linux")]` to mirror the Windows variant.
+* **Unified get_capturables Signature**: Standardized the parameters of `get_capturables` to take `wayland_support: bool` and `capture_cursor: bool` on all platforms, removing conditional inline parameters.
 
 ---
 
@@ -51,7 +52,7 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 ### Phase 1 — Windows Stability & Drawing Quality (Completed ✅)
 * **Goal**: Stabilize memory allocations, ensure safe kernel handle drops, scale stylus pressure mappings accurately up to 1024, and resolve micro-stuttering using microsecond timestamping at capture boundaries. See [[CASE_STUDIES#Chapter 1 Memory Leak in Windows Touch Injection]], [[CASE_STUDIES#Chapter 2 Handle Leak: Synthetic Pointer Devices]], and [[CASE_STUDIES#Chapter 10 Frame Pacing & Timing Resolution]].
 
-### Phase 2 — Plug-and-Play USB, mDNS & Community PRs (Current 🚀)
+### Phase 2 — Plug-and-Play USB, mDNS & Community PRs (Completed ✅)
 * **Goal**: Implement click-to-reconnect and HiDPI coordinate scaling alignments (PR #290), integrate virtual keyboard bindings (PR #291), and configure network discovery protocols.
 - [x] **Clean Executable Reference Client Build**: Created `build_web_client` in `build/common.rs` to invoke npm/pnpm directly.
 - [x] **Removed Auto-Install**: Enforced explicit panic errors if dependency modules are missing, protecting compilation determinism.
@@ -62,8 +63,9 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 - [x] **Recursive Asset Rebuild Tracking**: Configured Cargo to watch all `www/src` files recursively, preventing stale assets.
 - [x] **Safety Config Fallback**: Added default configuration fallback when writing virtual key profiles dynamically.
 - [x] **mDNS Discovery & USB Auto ADB reverse**: Automatically reverse tcp ports (`adb reverse tcp:1701 tcp:1701`) when Android is connected via USB, and broadcast the host via mDNS. See [[CASE_STUDIES#Chapter 14 mDNS Discovery & USB Auto ADB Reverse]].
+- [x] **OS Decoupling & Unified Wire Protocol**: Unified `get_capturables` signature, aligned platform gating on input devices, and established the platform-agnostic client configuration wire model. See [[CASE_STUDIES#Chapter 15 OS Decoupling & Unified Wire Protocol]].
 
-### Phase 3 — Android Native Client (Kotlin + Jetpack Compose) (Future 🚀)
+### Phase 3 — Android Native Client (Kotlin + Jetpack Compose) (Current 🚀)
 * **Goal**: Replace the web client completely with a native Kotlin Android application to bypass browser rendering bottlenecks and target **120 FPS** with ultra-low latency. See [[CASE_STUDIES#Chapter 12 Evolving to Modular Multi-Device Platform]].
 - [ ] **Kotlin WebSocket Engine**: Connect native client directly to `protocol.rs` serializations.
 - [ ] **MediaCodec Hardware Decoding**: Decode H.264 streams directly into native Android `SurfaceView` or Jetpack Compose Canvas.

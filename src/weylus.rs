@@ -75,6 +75,8 @@ impl Weylus {
                 encoder_options,
                 #[cfg(target_os = "linux")]
                 wayland_support: config.wayland_support,
+                #[cfg(not(target_os = "linux"))]
+                wayland_support: false,
                 no_gui: config.no_gui,
             },
         );

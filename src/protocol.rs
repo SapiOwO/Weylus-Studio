@@ -1,8 +1,21 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ClientCapabilities {
+    #[serde(default)]
+    pub virtual_keyboard: bool,
+    #[serde(default)]
+    pub uinput: bool,
+    #[serde(default)]
+    pub hover: bool,
+    #[serde(default)]
+    pub clipboard: bool,
+    #[serde(default)]
+    pub pressure: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClientConfiguration {
-    #[cfg(target_os = "linux")]
     pub uinput_support: bool,
     pub capturable_id: usize,
     pub capture_cursor: bool,
@@ -10,6 +23,8 @@ pub struct ClientConfiguration {
     pub max_height: usize,
     pub client_name: Option<String>,
     pub frame_rate: f64,
+    #[serde(default)]
+    pub capabilities: Option<ClientCapabilities>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
