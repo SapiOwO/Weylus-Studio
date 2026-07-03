@@ -15,3 +15,7 @@ c_helper/Cargo.lock
 /www/package-lock.json
 /.agents/
 /graphify-out/
+/android/.gradle/
+/android/build/
+/android/local.properties
+/android/app/build/
