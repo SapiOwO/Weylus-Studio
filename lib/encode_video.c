@@ -755,9 +755,18 @@ void open_video(VideoContext* ctx, Error* err)
 		}
 
 		ctx->c->pix_fmt = AV_PIX_FMT_YUV420P;
+		/* Phase A: x264 software low-latency tuning.
+		 * - ultrafast preset: minimum encoding complexity.
+		 * - zerolatency tune: disables lookahead and cabac-related buffering.
+		 * - max_b_frames=0: eliminates B-frame buffering (B-frames require the encoder
+		 *   to hold future frames before encoding the current one, adding 1-2 frame delay).
+		 * - keyint_min=1: allows IDR frames on every frame if needed for seek/recovery.
+		 * NVENC and MediaFoundation tuning are reserved for Phase B/C. */
 		av_opt_set(ctx->c->priv_data, "preset", "ultrafast", 0);
 		av_opt_set(ctx->c->priv_data, "tune", "zerolatency", 0);
 		av_opt_set(ctx->c->priv_data, "crf", "23", 0);
+		ctx->c->max_b_frames = 0;
+		ctx->c->keyint_min = 1;
 		set_codec_params(ctx);
 
 		ret = avcodec_open2(ctx->c, codec, NULL);

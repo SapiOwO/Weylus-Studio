@@ -64,7 +64,7 @@ fun ConnectScreen(
                     modifier = Modifier.padding(bottom = 24.dp)
                 )
 
-                if (sessionState == SessionState.DISCONNECTED || sessionState == SessionState.RECONNECTING) {
+                if (sessionState == SessionState.DISCONNECTED || sessionState == SessionState.RECOVERING) {
                     OutlinedTextField(
                         value = host,
                         onValueChange = { host = it },

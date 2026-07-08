@@ -2,6 +2,7 @@ package com.weylus.studio
 
 import android.os.Bundle
 import android.view.WindowManager
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        requestHighestRefreshRate()
 
         val transportImpl = WebSocketTransport()
         val sessionImpl = Session(transportImpl)
@@ -83,7 +85,7 @@ class MainActivity : ComponentActivity() {
                     ConnectScreen(
                         sessionState = sessionState,
                         errorMessage = errorMessage,
-                        onConnect = { host, port, clientName ->
+                        onConnect = { host, port, _ ->
                             errorMessage = null
                             val caps = provider.getCapabilities()
                             sessionImpl.start(host, port, caps, sessionListener)
@@ -93,6 +95,35 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Requests the highest available display refresh rate supported by this device.
+     * This sends a hint to the WindowManager — the OS may still choose a lower rate
+     * based on battery policy, thermal state, or display capabilities.
+     * Supported refresh rates depend on hardware (60, 90, 120, 144Hz, etc.).
+     */
+    private fun requestHighestRefreshRate() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val display = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                display
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay
+            }
+
+            val supportedModes = display?.supportedModes ?: return
+            val highestMode = supportedModes.maxByOrNull { it.refreshRate }
+
+            if (highestMode != null) {
+                Log.d("MainActivity", "Requesting display mode: ${highestMode.refreshRate} Hz (mode id ${highestMode.modeId})")
+                val params = window.attributes
+                params.preferredDisplayModeId = highestMode.modeId
+                window.attributes = params
+            } else {
+                Log.w("MainActivity", "No supported display modes found — using OS default refresh rate")
             }
         }
     }

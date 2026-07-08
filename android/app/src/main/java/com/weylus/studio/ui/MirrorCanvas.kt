@@ -59,7 +59,7 @@ fun MirrorCanvas(
                     }
                 })
 
-                setOnTouchListener { view, event ->
+                setOnTouchListener { _, event ->
                     val pointerType = when (event.getToolType(0)) {
                         MotionEvent.TOOL_TYPE_STYLUS -> PointerType.Pen
                         MotionEvent.TOOL_TYPE_FINGER -> PointerType.Touch

@@ -1,7 +1,6 @@
 package com.weylus.studio.input
 
 import android.content.Context
-import android.hardware.input.InputManager
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -13,22 +12,15 @@ class DeviceCapabilityProvider(private val context: Context) {
     fun getCapabilities(): ClientCapabilities {
         var hasPressure = false
         var hasHover = false
-        var hasTilt = false
 
-        val inputManager = context.getSystemService(Context.INPUT_SERVICE) as? InputManager
         val deviceIds = InputDevice.getDeviceIds()
         for (id in deviceIds) {
             val device = InputDevice.getDevice(id) ?: continue
             val sources = device.sources
 
             if ((sources and InputDevice.SOURCE_STYLUS) == InputDevice.SOURCE_STYLUS) {
-                val pressureRange = device.getMotionRange(MotionEvent.AXIS_PRESSURE)
-                if (pressureRange != null) {
+                if (device.getMotionRange(MotionEvent.AXIS_PRESSURE) != null) {
                     hasPressure = true
-                }
-                val tiltRange = device.getMotionRange(MotionEvent.AXIS_TILT)
-                if (tiltRange != null) {
-                    hasTilt = true
                 }
                 hasHover = true
             }

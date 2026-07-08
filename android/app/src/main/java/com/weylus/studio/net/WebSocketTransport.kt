@@ -2,6 +2,7 @@ package com.weylus.studio.net
 
 import okhttp3.*
 import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import java.util.concurrent.TimeUnit
 
 class WebSocketTransport(override val transportType: TransportType = TransportType.WEBSOCKET_ADB) : Transport {
@@ -60,7 +61,7 @@ class WebSocketTransport(override val transportType: TransportType = TransportTy
     override fun sendBinary(bytes: ByteArray): Boolean {
         val webSock = webSocket
         if (webSock != null) {
-            return webSock.send(ByteString.of(bytes, 0, bytes.size))
+            return webSock.send(bytes.toByteString())
         }
         return false
     }
