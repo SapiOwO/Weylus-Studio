@@ -1,6 +1,6 @@
 # Quickstart, Build Guide & Known Limitations
 
-This document is the primary entry point for building, running, and maintaining Weylus Studio on Windows. For architecture deep-dives and case studies, see the linked documents below.
+This document is the primary entry point for building, running, and maintaining Weylus Studio. For architecture deep-dives and case studies, see the linked documents below.
 
 *   **Architecture Reference**: How the input injection, screen capture, and video pipeline work → [[ARCHITECTURE]]
 *   **Case Studies**: Root-cause analysis of bugs found and resolved → [[CASE_STUDIES]]
@@ -111,3 +111,79 @@ The GUI will launch. Set an access code, click **Start**, then open the URL show
 
 ### Windows Pointer Type Issues
 *   Win32 input injection maps pen events with synthetic device handles. Software like Photoshop/Krita must support Windows Ink (Pointer API) to register pen pressure correctly. If you experience issues, toggle Windows Ink in your program's settings.
+
+---
+
+## 📱 5. Android Native Client (Phase 3)
+
+The Android Native Client is a pure Kotlin + Jetpack Compose app. It bypasses the browser to access native stylus APIs (`MotionEvent`) for true pressure, tilt, and hover at 120 FPS.
+
+### 5.1 Client Platform Overview
+
+| Platform | Client | Status |
+| :--- | :--- | :--- |
+| **Android** | Kotlin Native (`android/`) | 🚀 In Development |
+| **macOS** | Web browser (built-in) | ✅ Stable |
+| **Linux** | Web browser (built-in) | ✅ Stable |
+| **iOS** | Swift/SwiftUI | 🔮 Planned (Phase 5+) |
+
+### 5.2 Prerequisites (Android Client)
+
+| Component | Requirement |
+| :--- | :--- |
+| **JDK** | JDK 17+ (via `winget install Eclipse.Temurin.17.JDK` or Android Studio bundled JDK) |
+| **Android SDK** | Android SDK API Level 33+ (install via Android Studio or `sdkmanager`) |
+| **ADB** | Android Debug Bridge (bundled with Android Studio or `winget install Google.PlatformTools`) |
+| **Device / Emulator** | Physical Android device API 33+ recommended for stylus testing |
+
+> [!NOTE]
+> You do **not** need Android Studio to build the APK. A command-line-only build using `gradlew` works if the Android SDK is installed and `ANDROID_HOME` is set.
+
+### 5.3 Build Steps (Android APK)
+
+#### Option A: Command Line (Gradle)
+
+```powershell
+# Set ANDROID_HOME if not already in environment
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+
+# Build debug APK
+push-location android
+.\gradlew assembleDebug
+pop-location
+```
+
+The output APK will be at:
+```
+android\app\build\outputs\apk\debug\app-debug.apk
+```
+
+#### Option B: Android Studio
+1. Open **Android Studio**.
+2. Select **File → Open** and navigate to the `android/` subdirectory of this project.
+3. Let Gradle sync complete.
+4. Select **Build → Make Project** or press **Ctrl+F9**.
+5. Use **Run → Run 'app'** to deploy directly to a connected device or emulator.
+
+### 5.4 Sideloading to a Device (ADB)
+
+With the APK built, install it onto a connected Android device:
+
+```powershell
+adb install android\app\build\outputs\apk\debug\app-debug.apk
+```
+
+For USB tethering (lowest latency), reverse the WebSocket and uinput ports:
+
+```powershell
+adb reverse tcp:1701 tcp:1701
+adb reverse tcp:9001 tcp:9001
+```
+
+Then connect the native app to `ws://localhost:1701` instead of the WiFi IP address.
+
+### 5.5 Development Notes
+
+*   **Coordinate Mapping**: The `CoordinateMapper` class in `android/.../input/` handles all aspect-ratio and letterbox corrections. Do **not** pass raw `MotionEvent` coordinates directly to the WebSocket — always normalize through `CoordinateMapper.map()`.
+*   **Protocol Sync**: If you rename any field in `src/protocol.rs`, you must also update the corresponding `@SerialName` annotation in the Kotlin data classes. A mismatch causes silent deserialization failures on the server.
+*   **FrameScheduler**: Never call `Choreographer.postFrameCallback()` directly from `MediaCodecDecoder`. All frame presentation timing must go through `FrameScheduler` to maintain V-Sync alignment.

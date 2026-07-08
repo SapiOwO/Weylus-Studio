@@ -13,6 +13,7 @@ This document provides a full architectural breakdown of the Weylus Studio codeb
 | **Section 3** | Windows Input Injection (Win32 API) | 2026-06-18 | `CreateSyntheticPointerDevice`, pressure, tilt, multitouch |
 | **Section 4** | Video Capture & Encoding Pipeline | 2026-06-18 | DXGI capture, FFmpeg H.264, MediaFoundation/NVENC hardware acceleration |
 | **Section 5** | AI Assistant Collaboration Rules | 2026-06-18 | Safety constraints, unsafe Rust boundaries, non-goals |
+| **Section 6** | Android Native Client Architecture | 2026-07-08 | Kotlin + Compose, decoupled Transport/Session/Decoder/Input layers |
 
 ---
 
@@ -71,7 +72,24 @@ Weylus-Studio/
 │   ├── prebuilt_windows/              # Windows prebuilt FFmpeg/x264 .lib files (locally compiled cache)
 │   └── dist_{os}/                     # Built FFmpeg static/dynamic libraries (generated, gitignored)
 ├── Cargo.toml                         # Rust dependencies and platform-conditional deps
-└── build_ffmpeg_source_backup.rs      # Original monolithic build.rs backup (reference only)
+├── build_ffmpeg_source_backup.rs      # Original monolithic build.rs backup (reference only)
+└── android/                           # Native Android client (Phase 3)
+    └── app/src/main/java/com/weylus/studio/
+        ├── MainActivity.kt            # Entry point: lifecycle, orientation change dispatch
+        ├── net/
+        │   ├── Transport.kt           # Transport interface (connect/sendText/sendBinary/disconnect)
+        │   ├── WebSocketTransport.kt  # OkHttp WebSocket implementation of Transport
+        │   └── Session.kt             # Session state machine + SessionListener callbacks
+        ├── input/
+        │   ├── CoordinateMapper.kt    # Pure math: aspect-ratio + letterbox coordinate projection
+        │   └── DeviceCapabilityProvider.kt  # Runtime stylus/display hardware detection
+        ├── video/
+        │   ├── VideoDecoder.kt        # VideoDecoder interface
+        │   ├── MediaCodecDecoder.kt   # MediaCodec H.264 hardware decoder implementation
+        │   └── FrameScheduler.kt      # Choreographer-backed V-Sync frame scheduler
+        └── ui/
+            ├── ConnectScreen.kt       # Compose UI: server discovery and connection form
+            └── MirrorCanvas.kt        # Compose Canvas: decoded frame rendering surface
 ```
 
 ### Dependency Graph
@@ -94,7 +112,7 @@ graph TD
 
 ```mermaid
 graph TD
-    Tablet([Android Tablet Browser]) -->|1. PointerEvent via WebSocket| WS["websocket.rs: WeylusClientHandler"]
+    Tablet([Android Browser / Native Client]) -->|1. PointerEvent via WebSocket| WS["websocket.rs: WeylusClientHandler"]
     WS -->|2. Deserialize JSON| Proto["protocol.rs: PointerEvent struct"]
     Proto -->|3. Route to device| Win["input/autopilot_device_win.rs: WindowsInput"]
     Win -->|4. InjectSyntheticPointerInput| WinAPI(["Windows Win32 API"])
@@ -195,3 +213,61 @@ Any AI assistant collaborating on this codebase must adhere to the rules in [[CO
 * **Platform-conditional code**: Use `#[cfg(target_os = "windows")]` for all Windows-specific logic. Never put Windows-only code in a non-conditional block.
 * **Error handling**: Use `warn!()` from the `tracing` crate for recoverable errors.
 * **Memory safety in unsafe blocks**: Any `Box::into_raw()` must be paired with `Box::from_raw()` in the same function scope, or replaced with a borrow (`as_mut_ptr()`) when the callee does not take ownership. See [[CASE_STUDIES#Chapter 1 Memory Leak in Windows Touch Injection]] for details.
+
+---
+
+## Section 6: Android Native Client Architecture
+* **Introduced**: 2026-07-08 (Phase 3 Architecture Freeze)
+
+The Android Native Client is a pure Kotlin + Jetpack Compose application that connects directly to the Rust server's WebSocket protocol. It replaces the browser-based web client for the Android platform.
+
+### Platform Strategy
+
+| Platform | Client Approach | Reason |
+| :--- | :--- | :--- |
+| **Android** | Kotlin Native (this module) | `MotionEvent` stylus APIs (pressure, tilt, hover) require native access; browser sandboxing adds unacceptable latency |
+| **macOS** | Web browser (existing) | No tablet-primary use case; Apple Pencil targets iPad, not Mac |
+| **Linux** | Web browser (existing) | Wacom tablet support via browser Pointer Events API is sufficient; desktop-class workflow |
+| **iOS** (Phase 5+) | Swift/SwiftUI (future) | Apple Pencil on iPad requires native `UITouch` force and azimuth APIs |
+
+### Component Architecture
+
+```mermaid
+graph TD
+    UI["Jetpack Compose UI\n(ConnectScreen, MirrorCanvas)"] --> Session
+    Session --> Transport["Transport interface"]
+    Transport --> WST["WebSocketTransport\n(OkHttp)"]
+    Session --> Decoder["VideoDecoder interface"]
+    Decoder --> MCD["MediaCodecDecoder\n(Hardware H.264)"]
+    MCD --> FS["FrameScheduler\n(Choreographer V-Sync)"]
+    Session --> CM["CoordinateMapper\n(pure math, no UI deps)"]
+    Session --> DCP["DeviceCapabilityProvider\n(runtime hardware detection)"]
+```
+
+### Layer Isolation Rules
+
+| Layer | May Depend On | Must NOT Depend On |
+| :--- | :--- | :--- |
+| `Transport` | OkHttp, stdlib | Session, UI, Decoder |
+| `Session` | Transport, protocol types | UI Composables, MediaCodec |
+| `VideoDecoder` | Android MediaCodec API | Session, WebSocket, UI |
+| `FrameScheduler` | Choreographer | MediaCodec internals, Session |
+| `CoordinateMapper` | Kotlin stdlib only | Android SDK, Session, UI |
+| `UI (Compose)` | Session (via callbacks), CoordinateMapper | Transport, MediaCodec, WebSocket |
+
+### Protocol Wire Format (Kotlin ↔ Rust)
+
+The Android client serializes all messages using `kotlinx.serialization` to match `src/protocol.rs` Serde types exactly.
+
+| Rust Type (`protocol.rs`) | Kotlin Equivalent | Direction |
+| :--- | :--- | :--- |
+| `PointerEvent` | `PointerEvent` data class | Client → Server |
+| `WheelEvent` | `WheelEvent` data class | Client → Server |
+| `KeyboardEvent` | `KeyboardEvent` data class | Client → Server |
+| `ClientConfiguration` + `ClientCapabilities` | `ClientConfig` data class | Client → Server (handshake) |
+| `MessageOutbound::VideoFrame` | `ByteArray` (binary) | Server → Client |
+| `MessageOutbound::DisplayCapability` | `DisplayCapability` data class | Server → Client (once) |
+| `MessageOutbound::DisplayChanged` | `DisplayChanged` data class | Server → Client (runtime) |
+
+> [!IMPORTANT]
+> Any rename of a field in `src/protocol.rs` **must** be simultaneously reflected in the Kotlin `@SerialName` annotations in the Android client. A protocol drift will silently corrupt input injection on the server side.

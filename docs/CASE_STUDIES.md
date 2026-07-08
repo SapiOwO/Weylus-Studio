@@ -22,6 +22,8 @@ This unified document compiles all case studies for Weylus Studio. Each chapter 
 | **Chapter 12** | Evolving to Modular Multi-Device Platform | 2026-06-21 | Shifting from web-based mirroring to native Kotlin client & USB 120 FPS target | **Vision Defined** 🚀 |
 | **Chapter 13** | Build Decoupling & Configuration Fallback Safety | 2026-07-03 | Platform-neutral shell injection in `BuildCapabilities` and safe fallback struct generation | **Resolved** ✅ |
 | **Chapter 14** | mDNS Discovery & USB Auto ADB Reverse | 2026-07-03 | Broadcast host via local mDNS and periodically establish adb reverse port mappings | **Resolved** ✅ |
+| **Chapter 15** | OS Decoupling & Unified Wire Protocol | 2026-07-03 | Universal `ClientConfiguration` + `ClientCapabilities` handshake, symmetric enum gating | **Resolved** ✅ |
+| **Chapter 16** | Phase 3 Android Native Client Architecture Freeze | 2026-07-08 | Decoupled Transport/Session/Decoder/Scheduler/Input layers; protocol extended with `DisplayCapability` | **Architecture Frozen** ✅ |
 
 ---
 
@@ -549,3 +551,64 @@ $$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} +
   - **Universal Wire Protocol**: Removed `#[cfg]` gating from `uinput_support` in `ClientConfiguration` so that it parses unconditionally. Introduced `ClientCapabilities` with `#[serde(default)]` support to provide a scalable way for future native clients to advertise capabilities like pressure, hover, and virtual keyboards.
   - **Symmetric Enum Gating**: Applied `#[cfg(target_os = "linux")]` to `InputDeviceType::UInputDevice` to align with the Windows variant.
   - **Universal Helper Signature**: Unified `get_capturables` to take `wayland_support: bool` and `capture_cursor: bool` on all platforms, discarding them on non-Linux hosts to keep call sites clean and free of macro switches.
+
+---
+
+## Chapter 16: Phase 3 Android Native Client — Architecture Freeze
+* **Investigated**: 2026-07-08
+* **Resolved**: 2026-07-08
+* **Status**: ✅ **Architecture Frozen.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Developers building the Android native client, and end-users on Android tablets who need native stylus pressure and ultra-low-latency frame delivery beyond what a browser WebView can provide.
+
+#### WHAT
+* **What is the problem**:
+  1. **Browser WebSocket Latency**: The existing TypeScript web client runs in a browser sandbox with additional JS garbage collection pauses, adding 15–40 ms of jitter on top of network latency. This manifests as visible brush lag on fast strokes.
+  2. **Stylus API Limitations**: The browser's `PointerEvent.pressure` API does not expose raw stylus tilt azimuth, hover distance, or pen-button states reliably across all Android OEMs. `MotionEvent` on native Android provides all of these.
+  3. **No V-Sync Alignment**: The browser MSE player buffers video frames independently of the display's V-Sync signal, causing occasional frame duplication and tearing artifacts.
+  4. **Architectural Coupling Risk**: Without defined boundaries, a naive port risks putting WebSocket logic inside Compose composables or calling `Choreographer` from the decoder thread — both of which cause threading bugs and hard-to-test code.
+
+#### WHERE
+* **Where does it occur**: The gap exists between the Rust server's streaming WebSocket endpoint (`src/websocket.rs`) and the Android client layer. The existing TypeScript client (`ts/lib.ts`) cannot be used on Android without a browser sandbox.
+
+#### WHEN
+* **When is it triggered**: Latency problems appear at stylus speeds above 80 mm/s (typical fast strokes). The V-Sync mismatch appears as dropped or duplicated frames at 60 Hz. The stylus API gap is permanent on Chrome for Android.
+
+#### WHY
+* **Why did we architect this way (Root Cause)**:
+  - The original Weylus server was designed for a browser client (TypeScript + MSE). A direct port without boundaries would push WebSocket and MediaCodec logic into the same object, making testing impossible and refactoring fragile.
+  - Community feedback (ChatGPT architecture review, July 2026) reinforced that `Choreographer` should be an interface boundary, not a concrete call inside the decoder, and that `DisplayCapability` should be a one-time server-push event — not a client-poll.
+
+#### HOW
+* **How it was resolved (Architecture Freeze)**:
+
+  **Transport Layer**:
+  - Defined `Transport` interface (`net/Transport.kt`) with `connect()`, `sendText()`, `sendBinary()`, and `disconnect()` methods plus `TransportListener` callback interface.
+  - Implemented `WebSocketTransport` using OkHttp. Future USB/ADB or QUIC transports can swap in without touching `Session`.
+
+  **Session State Machine**:
+  - `SessionState` enum: `Negotiating`, `Streaming`, `Recovering`, `Disconnected`, `Error`. No direct transitions outside `updateState()` guard.
+  - `Session` holds `Transport`, `VideoDecoder`, `CoordinateMapper`, and `DeviceCapabilityProvider` as constructor-injected dependencies.
+  - `SessionListener` callbacks (`onVideoConfigReceived`, `onStateChanged`, `onVideoFrameReceived`) decouple UI from network events.
+
+  **CoordinateMapper**:
+  - Pure Kotlin class with zero Android SDK imports. Accepts `serverWidth`, `serverHeight`, `viewWidth`, `viewHeight` in constructor.
+  - `updateViewport()` recomputes the letterbox `Rect` on orientation change.
+  - `map(rawX, rawY)` projects raw `MotionEvent` coordinates through the active letterbox into normalized [0.0, 1.0] server space.
+
+  **DeviceCapabilityProvider**:
+  - Probes `InputDevice.getDevice()` at runtime to detect `SOURCE_STYLUS`, supported pressure ranges, and `FEATURE_STYLUS_BASED_STYLUS_POINTER`.
+  - Exposes `getCapabilities(): ClientCapabilities` to `Session` for handshake negotiation with the server.
+
+  **FrameScheduler**:
+  - `FrameScheduler` interface with `scheduleFrame(callback)` and `cancelPending()` decouples decoder from presentation timing.
+  - `ChoreographerFrameScheduler` implementation registers a `Choreographer.FrameCallback` on the display V-Sync signal.
+  - `MediaCodecDecoder` calls `frameScheduler.scheduleFrame { renderOutputBuffer() }` — never `Choreographer` directly.
+
+  **Protocol Extensions (`src/protocol.rs` + `src/websocket.rs`)**:
+  - `DisplayCapability`: Server sends once after handshake, advertising server resolution, color space, and supported input modes.
+  - `DisplayChanged`: Server sends on runtime orientation change to trigger `CoordinateMapper.updateViewport()` on the client.
+  - Both are added to `MessageOutbound` enum and deserialized in `Session.onTextMessageReceived()` on the Kotlin side.

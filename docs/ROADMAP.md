@@ -10,7 +10,7 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 | :--- | :--- | :--- | :--- |
 | **Section 1** | Pillars of Engineering Integrity | 2026-06-18 | Active |
 | **Section 2** | Historical Change Log Journal | 2026-06-18 | Ongoing |
-| **Section 3** | Evolving Unified Phase Plan | 2026-07-03 | Active Plan |
+| **Section 3** | Evolving Unified Phase Plan | 2026-07-08 | Active Plan |
 | **Section 4** | Rust Learning Milestones | 2026-06-18 | In progress |
 
 ---
@@ -45,6 +45,15 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 * **Platform Gating Symmetry**: Gated `InputDeviceType::UInputDevice` with `#[cfg(target_os = "linux")]` to mirror the Windows variant.
 * **Unified get_capturables Signature**: Standardized the parameters of `get_capturables` to take `wayland_support: bool` and `capture_cursor: bool` on all platforms, removing conditional inline parameters.
 
+### July 8, 2026 — Android Native Client Architecture Freeze (Phase 3 Core)
+* **Architecture Freeze**: Locked the decoupled component boundaries for the native Android Kotlin client. All layers (UI, Decoder, Scheduler, Input, Transport) are now defined as pure interfaces with no cross-layer dependencies.
+* **CoordinateMapper**: Implemented as a pure math class with no Android or UI dependencies. Maps raw `MotionEvent` coordinates through aspect-ratio letterbox correction to normalized server space.
+* **DeviceCapabilityProvider**: Dynamic runtime detection of stylus hardware, pen button support, and display refresh rate. Replaces compile-time static capabilities with runtime probing.
+* **FrameScheduler (Choreographer-backed)**: Decouples `MediaCodec` buffer management from frame presentation. The decoder produces frames; the scheduler paces presentation via `Choreographer.FrameCallback`.
+* **SessionState Machine**: Explicit lifecycle states (`Negotiating`, `Streaming`, `Recovering`, `Disconnected`, `Error`) with transition guards. Prevents illegal state transitions from causing crashes.
+* **Transport Abstraction**: `Transport` interface + `WebSocketTransport` implementation via OkHttp. Designed for future swap with USB/ADB or QUIC transport.
+* **Protocol Extensions**: Added `DisplayCapability` (one-time server handshake) and `DisplayChanged` (runtime orientation event) to `src/protocol.rs` and `src/websocket.rs`.
+
 ---
 
 ## Section 3: Evolving Unified Phase Plan
@@ -67,10 +76,22 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 
 ### Phase 3 — Android Native Client (Kotlin + Jetpack Compose) (Current 🚀)
 * **Goal**: Replace the web client completely with a native Kotlin Android application to bypass browser rendering bottlenecks and target **120 FPS** with ultra-low latency. See [[CASE_STUDIES#Chapter 12 Evolving to Modular Multi-Device Platform]].
-- [ ] **Kotlin WebSocket Engine**: Connect native client directly to `protocol.rs` serializations.
-- [ ] **MediaCodec Hardware Decoding**: Decode H.264 streams directly into native Android `SurfaceView` or Jetpack Compose Canvas.
-- [ ] **Native MotionEvent Handler**: Access stylus API parameters (`pressure`, `orientation`, `tilt`, and hover events) with zero latency overhead.
-- [ ] **Samsung S Pen SDK Integration**: Calibrate S Pen-specific hover and Air Action signals.
+
+#### Architecture Layer (Completed ✅)
+- [x] **Transport Abstraction**: `Transport` interface and `WebSocketTransport` implementation via OkHttp. Future-proofed for USB/ADB and QUIC swap.
+- [x] **SessionState Machine**: Explicit lifecycle with transition guards (`Negotiating` → `Streaming` → `Recovering` → `Disconnected`).
+- [x] **CoordinateMapper**: Pure math class for aspect-ratio-aware, letterbox-corrected coordinate projection from `MotionEvent` to normalized server space.
+- [x] **DeviceCapabilityProvider**: Runtime detection of stylus hardware, pen buttons, and display refresh rate.
+- [x] **FrameScheduler (Choreographer-backed)**: Decouples `MediaCodec` buffer management from V-Sync paced frame presentation.
+- [x] **Protocol Extensions**: `DisplayCapability` (handshake) and `DisplayChanged` (runtime orientation) added to `src/protocol.rs`.
+
+#### Implementation Phase (Next 🚧)
+- [ ] **MediaCodec Hardware Decoding**: Decode H.264 streams directly into `SurfaceView` using Android `MediaCodec` hardware decoder.
+- [ ] **MirrorCanvas Compose Surface**: Render decoded frames via Jetpack Compose `Canvas` with `CoordinateMapper` integration.
+- [ ] **Native MotionEvent Handler**: Forward `pressure`, `orientation`, `tiltX`, `tiltY`, and hover events from `MotionEvent` directly to the `Session` WebSocket pipe.
+- [ ] **ConnectScreen UI**: Compose-based server discovery UI supporting manual IP entry and mDNS auto-discovery.
+- [ ] **Samsung S Pen SDK Integration**: Calibrate S Pen-specific hover and Air Action signals via Samsung Pen SDK.
+- [ ] **APK Build & Distribution**: Configure Gradle release signing, minification, and produce a distributable debug APK.
 
 ### Phase 4 — Virtual Display & Second Screen (Future 🚀)
 * **Goal**: Leverage Windows Indirect Display Driver (IddCx) to create a virtual monitor, streaming the workspace exclusively to the tablet for a complete dual-display drawing experience.
