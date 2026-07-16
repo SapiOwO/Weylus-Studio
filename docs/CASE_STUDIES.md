@@ -24,6 +24,7 @@ This unified document compiles all case studies for Weylus Studio. Each chapter 
 | **Chapter 14** | mDNS Discovery & USB Auto ADB Reverse | 2026-07-03 | Broadcast host via local mDNS and periodically establish adb reverse port mappings | **Resolved** ✅ |
 | **Chapter 15** | OS Decoupling & Unified Wire Protocol | 2026-07-03 | Universal `ClientConfiguration` + `ClientCapabilities` handshake, symmetric enum gating | **Resolved** ✅ |
 | **Chapter 16** | Phase 3 Android Native Client Architecture Freeze | 2026-07-08 | Decoupled Transport/Session/Decoder/Scheduler/Input layers; protocol extended with `DisplayCapability` | **Architecture Frozen** ✅ |
+| **Chapter 17** | FrameTiming Telemetry Pipeline & First APK Debug Build | 2026-07-16 | End-to-end latency measurement across receive/decode/present stages; first installable APK produced | **Implemented** ✅ |
 
 ---
 
@@ -612,3 +613,55 @@ $$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} +
   - `DisplayCapability`: Server sends once after handshake, advertising server resolution, color space, and supported input modes.
   - `DisplayChanged`: Server sends on runtime orientation change to trigger `CoordinateMapper.updateViewport()` on the client.
   - Both are added to `MessageOutbound` enum and deserialized in `Session.onTextMessageReceived()` on the Kotlin side.
+
+---
+
+## Chapter 17: FrameTiming Telemetry Pipeline & First APK Debug Build
+* **Investigated**: 2026-07-16
+* **Resolved**: 2026-07-16
+* **Status**: ✅ **Implemented. First installable APK produced.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Developers needing to measure and prove glass-to-glass latency improvements, and end-users who rely on low-latency stylus responsiveness.
+
+#### WHAT
+* **What is the problem**:
+  1. **No Observability**: After implementing `KEY_LOW_LATENCY`, `max_b_frames=0`, and `requestHighestRefreshRate()`, there was no way to quantitatively verify that latency had actually improved. All improvements were theoretical.
+  2. **Bottleneck Blindness**: Without per-stage timestamps, it was impossible to determine whether a latency spike originated from the network, the decoder, or the display scheduler.
+  3. **No Installable APK**: The Android client existed only as source code with no compiled artifact that could be deployed to a physical tablet for real-world testing.
+
+#### WHERE
+* **Where does it occur**: The measurement gap exists in the pipeline between `Session.onBinaryMessageReceived()` (frame arrives from WebSocket) and `ChoreographerFrameScheduler.doFrame()` (frame is released to the display surface).
+
+#### WHEN
+* **When is it triggered**: Every time a binary video frame is received from the host PC WebSocket. Telemetry runs on every frame during a live streaming session.
+
+#### WHY
+* **Why did we implement telemetry before end-to-end testing**:
+  - Without measurement, optimization is guesswork. The ChatGPT architecture review (July 2026) explicitly stated: *"investasi terbesar berikutnya bukan mengubah parameter encoder, melainkan membangun telemetry pipeline."*
+  - Telemetry data from `adb logcat` allows identifying bottlenecks on the actual hardware without modifying code between test runs.
+
+#### HOW
+* **How it was resolved**:
+
+  **FrameTiming Data Class (`Session.kt`)**:
+  - Added `FrameTiming(receiveTimestampUs, decodeTimestampUs, presentTimestampUs, frameSizeBytes)` to track the lifecycle of each frame.
+  - Helper methods: `decodeLatencyMs()`, `presentLatencyMs()`, `totalLatencyMs()` compute each pipeline stage in milliseconds.
+  - `FrameTiming.log()` emits a structured `adb logcat` line tagged `FrameTiming` after each frame is presented: `FrameTiming | size=12340B | decode=3.21ms | present=1.05ms | total=4.26ms`.
+
+  **FrameScheduler Interface Extension (`FrameScheduler.kt`)**:
+  - Added optional `onPresented: ((presentTimestampUs: Long) -> Unit)?` parameter to `onFrameAvailable()`.
+  - `ChoreographerFrameScheduler` introduced `PendingFrame(renderAction, onPresented)` to carry render action and its telemetry callback atomically through the queue.
+  - `doFrame()` records `presentTimestampUs = System.nanoTime() / 1_000L` immediately after `releaseOutputBuffer()` and invokes `onPresented`.
+
+  **MediaCodecDecoder Wiring (`MediaCodecDecoder.kt`)**:
+  - `decodeTimestampUs` is now stamped via `System.nanoTime()` immediately when `dequeueOutputBuffer()` returns a valid buffer index.
+  - `listener.onFrameDecoded(decodeTimestampUs)` now receives real decode completion time (not presentation time from the container).
+
+  **First Debug APK**:
+  - `gradlew assembleDebug` completed successfully in 32 seconds.
+  - Output: `android/app/build/outputs/apk/debug/app-debug.apk`.
+  - Installation command: `adb install android\app\build\outputs\apk\debug\app-debug.apk`.
+  - Live telemetry monitoring command: `adb logcat -s FrameTiming`.
