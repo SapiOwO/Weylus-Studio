@@ -85,15 +85,23 @@ class MediaCodecDecoder : VideoDecoder {
                             val bufferInfo = MediaCodec.BufferInfo()
                             val outputBufferId = activeCodec.dequeueOutputBuffer(bufferInfo, 2000)
                             if (outputBufferId >= 0) {
-                                // Delegate render callback to FrameScheduler instead of direct rendering
-                                scheduler?.onFrameAvailable(bufferInfo.presentationTimeUs) {
-                                    try {
-                                        activeCodec.releaseOutputBuffer(outputBufferId, true)
-                                        listener?.onFrameDecoded(bufferInfo.presentationTimeUs)
-                                    } catch (e: Exception) {
-                                        Log.e("MediaCodecDecoder", "Error releasing buffer on render: ${e.message}")
-                                    }
-                                }
+                                // Capture decode completion timestamp before handing off to scheduler.
+                                val decodeTimestampUs = System.nanoTime() / 1_000L
+                                listener?.onFrameDecoded(decodeTimestampUs)
+
+                                // Delegate render callback to FrameScheduler (V-Sync aligned).
+                                // onPresented is invoked after the surface receives the frame.
+                                scheduler?.onFrameAvailable(
+                                    presentationTimeUs = bufferInfo.presentationTimeUs,
+                                    renderAction = {
+                                        try {
+                                            activeCodec.releaseOutputBuffer(outputBufferId, true)
+                                        } catch (e: Exception) {
+                                            Log.e("MediaCodecDecoder", "Error releasing buffer on render: ${e.message}")
+                                        }
+                                    },
+                                    onPresented = null // Wired externally via Session.onFramePresented
+                                )
                             }
                         } catch (e: Exception) {
                             Log.e("MediaCodecDecoder", "Error dequeuing output buffer: ${e.message}")
