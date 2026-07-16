@@ -122,7 +122,7 @@ The Android Native Client is a pure Kotlin + Jetpack Compose app. It bypasses th
 
 | Platform | Client | Status |
 | :--- | :--- | :--- |
-| **Android** | Kotlin Native (`android/`) | 🚀 In Development |
+| **Android** | Kotlin Native (`android/`) | ✅ Implemented (In Test) |
 | **macOS** | Web browser (built-in) | ✅ Stable |
 | **Linux** | Web browser (built-in) | ✅ Stable |
 | **iOS** | Swift/SwiftUI | 🔮 Planned (Phase 5+) |
@@ -187,3 +187,17 @@ Then connect the native app to `ws://localhost:1701` instead of the WiFi IP addr
 *   **Coordinate Mapping**: The `CoordinateMapper` class in `android/.../input/` handles all aspect-ratio and letterbox corrections. Do **not** pass raw `MotionEvent` coordinates directly to the WebSocket — always normalize through `CoordinateMapper.map()`.
 *   **Protocol Sync**: If you rename any field in `src/protocol.rs`, you must also update the corresponding `@SerialName` annotation in the Kotlin data classes. A mismatch causes silent deserialization failures on the server.
 *   **FrameScheduler**: Never call `Choreographer.postFrameCallback()` directly from `MediaCodecDecoder`. All frame presentation timing must go through `FrameScheduler` to maintain V-Sync alignment.
+
+### 5.6 Latency Telemetry Monitoring (FrameTiming)
+
+The native client logs end-to-end pipeline latencies (Receive → Decode → Present) to track jitter and system bottlenecks. To monitor this telemetry in real-time, connect your tablet via USB/ADB and execute:
+
+```powershell
+adb logcat -s FrameTiming
+```
+
+Example telemetry log output:
+```text
+D/FrameTiming: FrameTiming | size=14820B | decode=3.10ms | present=1.20ms | total=4.30ms
+```
+This allows confirming 120Hz V-Sync frame scheduling boundaries and microsecond-level hardware decoding overhead.
