@@ -24,6 +24,7 @@ struct VideoConfig {
     max_width: usize,
     max_height: usize,
     frame_rate: f64,
+    raw_h264: bool,
 }
 
 enum VideoCommands {
@@ -221,6 +222,12 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
         S: WeylusSender,
         FnUInput: Fn(),
     {
+        if self.capturables.is_empty() {
+            self.capturables = get_capturables(
+                self.config.wayland_support,
+                self.capture_cursor,
+            );
+        }
         let _client_name_changed = if self.client_name != config.client_name {
             self.client_name = config.client_name;
             true
@@ -291,6 +298,8 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
                     .map(|d| d.set_capturable(capturable.clone()));
             }
 
+            let raw_h264 = config.capabilities.map_or(false, |caps| caps.raw_h264);
+
             self.video_sender
                 .send(VideoCommands::Start(VideoConfig {
                     capturable,
@@ -298,6 +307,7 @@ impl<S, R, FnUInput> WeylusClientHandler<S, R, FnUInput> {
                     max_width: config.max_width,
                     max_height: config.max_height,
                     frame_rate: config.frame_rate,
+                    raw_h264,
                 }))
                 .unwrap();
         } else {
@@ -324,6 +334,7 @@ fn handle_video<S: WeylusSender + Clone + 'static>(
     let mut frame_duration = EFFECTIVE_INIFINITY;
     let mut last_frame = Instant::now();
     let mut paused = false;
+    let mut raw_h264 = false;
 
     loop {
         let now = Instant::now();
@@ -350,6 +361,7 @@ fn handle_video<S: WeylusSender + Clone + 'static>(
                     //
                     // This shouldn't affect other Recorder trait objects.
                     recorder = None;
+                    video_encoder = None; // Reset video encoder on start to apply new options
                 }
                 match config.capturable.recorder(config.capture_cursor) {
                     Ok(r) => {
@@ -367,6 +379,7 @@ fn handle_video<S: WeylusSender + Clone + 'static>(
                     }
                 }
                 last_frame = Instant::now();
+                raw_h264 = config.raw_h264;
 
                 // The Duration type can not handle infinity, if the frame rate is set to 0 we just
                 // set the duration between two frames to a very long one, which is effectively
@@ -426,6 +439,7 @@ fn handle_video<S: WeylusSender + Clone + 'static>(
                         height_in,
                         width_out,
                         height_out,
+                        raw_h264,
                         move |data| {
                             if let Err(err) = sender.send_video(data) {
                                 warn!("Failed to send video frame: {err}!");

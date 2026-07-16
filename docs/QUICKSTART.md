@@ -81,12 +81,20 @@ cargo build --release
 ```
 The first build compiles x264 and FFmpeg from source. Subsequent builds are instantaneous.
 
-### Step 5: Run
+### Step 5: Run using Weylus Studio Debug Launcher (Recommended)
+Weylus Studio includes a unified Python launcher script `main.py` that automates setting up the ADB reverse tunnel, building the server, and piping both the PC and Android logcat streams side-by-side with colors.
+
+To run:
 ```powershell
-.\target\release\weylus.exe
+# For normal high-performance drawing (Release Mode)
+python main.py --release
+
+# For local code testing (Debug/Dev Mode)
+python main.py
 ```
 
-The GUI will launch. Set an access code, click **Start**, then open the URL shown on your Android tablet browser.
+Press `Ctrl+C` in your terminal to cleanly terminate both the host server and tablet logging processes.
+Once the server output prints `🚀 WEYLUS STUDIO IS READY! Connect your tablet now.`, launch the Weylus Studio app on your tablet and connect.
 
 ---
 
@@ -122,7 +130,7 @@ The Android Native Client is a pure Kotlin + Jetpack Compose app. It bypasses th
 
 | Platform | Client | Status |
 | :--- | :--- | :--- |
-| **Android** | Kotlin Native (`android/`) | ✅ Implemented (In Test) |
+| **Android** | Kotlin Native (`android/`) | ✅ Implemented & Ready (EXPERIMENTAL) |
 | **macOS** | Web browser (built-in) | ✅ Stable |
 | **Linux** | Web browser (built-in) | ✅ Stable |
 | **iOS** | Swift/SwiftUI | 🔮 Planned (Phase 5+) |

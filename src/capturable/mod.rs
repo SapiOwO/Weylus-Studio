@@ -1,5 +1,6 @@
 use std::boxed::Box;
 use std::error::Error;
+use tracing::{info, warn};
 
 #[cfg(target_os = "macos")]
 pub mod core_graphics;
@@ -12,6 +13,8 @@ pub mod testsrc;
 
 #[cfg(target_os = "windows")]
 pub mod captrs_capture;
+#[cfg(target_os = "windows")]
+pub mod dxgi_dup;
 #[cfg(target_os = "windows")]
 pub mod win_ctx;
 #[cfg(target_os = "linux")]
@@ -129,17 +132,46 @@ pub fn get_capturables(
 
     #[cfg(target_os = "windows")]
     {
+        use crate::capturable::dxgi_dup::enumerate_dxgi_displays;
         use crate::capturable::captrs_capture::CaptrsCapturable;
         use crate::capturable::win_ctx::WinCtx;
-        let winctx = WinCtx::new();
-        for (i, o) in winctx.get_outputs().iter().enumerate() {
-            let captr = CaptrsCapturable::new(
-                i as u8,
-                String::from_utf16_lossy(o.DeviceName.as_ref()),
-                o.DesktopCoordinates,
-                winctx.get_union_rect().clone(),
-            );
-            capturables.push(Box::new(captr));
+
+        // Prefer DXGI Desktop Duplication — works with dedicated GPU (RTX/AMD)
+        // and hardware-accelerated desktop composition (DirectX 12, Vulkan, etc.)
+        let dxgi_result = enumerate_dxgi_displays();
+        match dxgi_result {
+            Ok(dxgi_displays) if !dxgi_displays.is_empty() => {
+                info!("Using DXGI Desktop Duplication backend ({} display(s) found)", dxgi_displays.len());
+                for d in dxgi_displays {
+                    capturables.push(Box::new(d));
+                }
+            }
+            Ok(_) => {
+                warn!("DXGI enumerated 0 displays, falling back to captrs (GDI)");
+                let winctx = WinCtx::new();
+                for (i, o) in winctx.get_outputs().iter().enumerate() {
+                    let captr = CaptrsCapturable::new(
+                        i as u8,
+                        String::from_utf16_lossy(o.DeviceName.as_ref()),
+                        o.DesktopCoordinates,
+                        winctx.get_union_rect().clone(),
+                    );
+                    capturables.push(Box::new(captr));
+                }
+            }
+            Err(err) => {
+                warn!("DXGI backend failed ({}), falling back to captrs (GDI)", err);
+                let winctx = WinCtx::new();
+                for (i, o) in winctx.get_outputs().iter().enumerate() {
+                    let captr = CaptrsCapturable::new(
+                        i as u8,
+                        String::from_utf16_lossy(o.DeviceName.as_ref()),
+                        o.DesktopCoordinates,
+                        winctx.get_union_rect().clone(),
+                    );
+                    capturables.push(Box::new(captr));
+                }
+            }
         }
     }
 

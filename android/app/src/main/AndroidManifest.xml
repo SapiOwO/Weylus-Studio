@@ -9,6 +9,7 @@
         android:label="Weylus Studio"
         android:roundIcon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.WeylusStudio">
         <activity
             android:name=".MainActivity"

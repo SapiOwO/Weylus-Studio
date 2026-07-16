@@ -46,6 +46,9 @@ class MainActivity : ComponentActivity() {
             var sessionState by remember { mutableStateOf(SessionState.DISCONNECTED) }
             var errorMessage by remember { mutableStateOf<String?>(null) }
 
+            var videoWidth by remember { mutableStateOf(1920) }
+            var videoHeight by remember { mutableStateOf(1080) }
+
             val sessionListener = object : SessionListener {
                 override fun onStateChanged(state: SessionState) {
                     sessionState = state
@@ -54,7 +57,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                override fun onVideoConfigReceived(width: Int, height: Int) {}
+                override fun onVideoConfigReceived(width: Int, height: Int) {
+                    Log.i("MainActivity", "[WEYLUS] Configured video resolution: ${width}x${height}")
+                    videoWidth = width
+                    videoHeight = height
+                }
 
                 override fun onVideoFrameReceived(bytes: ByteArray) {
                     decoderImpl.feedPacket(bytes, System.nanoTime() / 1000)
@@ -73,6 +80,8 @@ class MainActivity : ComponentActivity() {
                     MirrorCanvas(
                         decoder = decoderImpl,
                         scheduler = schedulerImpl,
+                        videoWidth = videoWidth,
+                        videoHeight = videoHeight,
                         onPointerEvent = { event ->
                             sessionImpl.sendPointerEvent(event)
                         },

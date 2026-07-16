@@ -19,3 +19,6 @@ c_helper/Cargo.lock
 /android/build/
 /android/local.properties
 /android/app/build/
+/android/app/bin/
+dxgi_debug_frame_*.png
+*.log

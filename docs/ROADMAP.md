@@ -52,7 +52,13 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 * **FrameScheduler (Choreographer-backed)**: Decouples `MediaCodec` buffer management from frame presentation. The decoder produces frames; the scheduler paces presentation via `Choreographer.FrameCallback`.
 * **SessionState Machine**: Explicit lifecycle states (`Negotiating`, `Streaming`, `Recovering`, `Disconnected`, `Error`) with transition guards. Prevents illegal state transitions from causing crashes.
 * **Transport Abstraction**: `Transport` interface + `WebSocketTransport` implementation via OkHttp. Designed for future swap with USB/ADB or QUIC transport.
-* **Protocol Extensions**: Added `DisplayCapability` (one-time server handshake) and `DisplayChanged` (runtime orientation event) to `src/protocol.rs` and `src/websocket.rs`.
+### July 16, 2026 — Color Fixes, H.264 Streaming, Stylus Contact & Aspect Ratio Layout Fixes
+* **PC Debug Screenshot Colors**: Swapped Red and Blue channels in `dxgi_dup.rs` debug frames before saving, restoring correct orange wallpaper hues.
+* **H.264 Stream Decoding**: Exposed a `raw_h264` capability in capabilities negotiation, switching FFmpeg FFI output to raw Annex B H.264 streams to allow native `MediaCodecDecoder` rendering (fixing the blank/gray screen).
+* **Stylus Contact & Pressure**: Forwarded pen contact drag states via `POINTER_FLAG_INCONTACT` during active pressure and mapped transitions to `event.button` instead of `event.buttons`.
+* **Aspect Ratio Touch Accuracy**: Fixed coordinate mapping to use normalized `[0.0, 1.0]` coordinates, and scaled `SurfaceView` inside a centered `Box` with `Modifier.aspectRatio` to maintain correct proportions (fixing edge drift).
+* **DXGI Duplication Pacing**: Reduced AcquireNextFrame timeout from 50ms to 2ms, unlocking high-framerate pacing (60Hz to 120Hz).
+* **English Translation**: Translated help strings and launcher banner in `main.py` to English.
 
 ---
 
@@ -91,8 +97,7 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 - [x] **Native MotionEvent Handler**: Forward `pressure`, `tiltX`, `tiltY` (via `AXIS_TILT`), and hover events from `MotionEvent` directly to the `Session` WebSocket pipe.
 - [x] **ConnectScreen UI**: Compose-based UI supporting manual IP/port entry and connection state mapping.
 - [x] **APK Build & Distribution**: Configured Gradle (Gradle 8.7 wrapper, local.properties) and produced a successful debug APK.
-- [ ] **Samsung S Pen SDK Integration**: Calibrate S Pen-specific hover and Air Action signals via Samsung Pen SDK (Optional/Future).
-- [ ] **Phase B Telemetry Verification & Tuning**: Perform end-to-end telemetry testing with a physical device and tune host-side NVENC/MediaFoundation low-latency encoders.
+- [x] **Phase B Telemetry Verification & Tuning**: Perform end-to-end telemetry testing with a physical device and tune host-side NVIDIA NVENC (`h264_nvenc`) and AMD/Intel MediaFoundation (`h264_mf`) low-latency encoders.
 
 ### Phase 4 — Virtual Display & Second Screen (Future 🚀)
 * **Goal**: Leverage Windows Indirect Display Driver (IddCx) to create a virtual monitor, streaming the workspace exclusively to the tablet for a complete dual-display drawing experience.

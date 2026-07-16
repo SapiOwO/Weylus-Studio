@@ -16,6 +16,7 @@ extern "C" {
         try_nvenc: c_int,
         try_videotoolbox: c_int,
         try_mediafoundation: c_int,
+        raw_h264: c_int,
     ) -> *mut c_void;
     fn open_video(handle: *mut c_void, err: *mut CError);
     fn destroy_video_encoder(handle: *mut c_void);
@@ -80,6 +81,7 @@ impl VideoEncoder {
         height_in: usize,
         width_out: usize,
         height_out: usize,
+        raw_h264: bool,
         mut write_data: impl FnMut(&[u8]) + 'static,
         options: EncoderOptions,
     ) -> Result<Box<Self>, CError> {
@@ -103,6 +105,7 @@ impl VideoEncoder {
                 options.try_nvenc.into(),
                 options.try_videotoolbox.into(),
                 options.try_mediafoundation.into(),
+                raw_h264.into(),
             )
         };
         video_encoder.handle = handle;

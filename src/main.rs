@@ -151,7 +151,7 @@ mod tests {
             try_mediafoundation: false,
         };
         let mut encoder =
-            video::VideoEncoder::new(width, height, width, height, |_| {}, opts).unwrap();
+            video::VideoEncoder::new(width, height, width, height, false, |_| {}, opts).unwrap();
         b.iter(|| encoder.encode(r.capture().unwrap(), std::time::Instant::now()));
     }
 
@@ -186,7 +186,7 @@ mod tests {
             try_mediafoundation: false,
         };
         let mut encoder =
-            video::VideoEncoder::new(width, height, width, height, |_| {}, opts).unwrap();
+            video::VideoEncoder::new(width, height, width, height, false, |_| {}, opts).unwrap();
         b.iter(|| encoder.encode(r.capture().unwrap(), std::time::Instant::now()));
     }
 
@@ -210,7 +210,7 @@ mod tests {
             try_mediafoundation: false,
         };
         let mut encoder =
-            video::VideoEncoder::new(WIDTH, HEIGHT, WIDTH, HEIGHT, |_| {}, opts).unwrap();
+            video::VideoEncoder::new(WIDTH, HEIGHT, WIDTH, HEIGHT, false, |_| {}, opts).unwrap();
         const SIZE: usize = WIDTH * HEIGHT * 4;
         let mut i = 0;
         b.iter(|| {
@@ -239,7 +239,7 @@ mod tests {
             try_mediafoundation: false,
         };
         let mut encoder =
-            video::VideoEncoder::new(WIDTH, HEIGHT, WIDTH, HEIGHT, |_| {}, opts).unwrap();
+            video::VideoEncoder::new(WIDTH, HEIGHT, WIDTH, HEIGHT, false, |_| {}, opts).unwrap();
         const SIZE: usize = WIDTH * HEIGHT * 4;
         let mut i = 0;
         b.iter(|| {
@@ -268,7 +268,7 @@ mod tests {
             try_mediafoundation: false,
         };
         let mut encoder =
-            video::VideoEncoder::new(WIDTH, HEIGHT, WIDTH, HEIGHT, |_| {}, opts).unwrap();
+            video::VideoEncoder::new(WIDTH, HEIGHT, WIDTH, HEIGHT, false, |_| {}, opts).unwrap();
         const SIZE: usize = WIDTH * HEIGHT * 4;
         let mut i = 0;
         b.iter(|| {

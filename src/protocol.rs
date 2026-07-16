@@ -27,6 +27,8 @@ pub struct ClientCapabilities {
     #[serde(default)]
     pub pressure: bool,
     #[serde(default)]
+    pub raw_h264: bool,
+    #[serde(default)]
     pub display: Option<DisplayCapability>,
 }
 

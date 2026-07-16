@@ -55,26 +55,47 @@ impl InputDevice for WindowsInput {
             (event.x * width as f64) as i32 + offset_x,
             (event.y * height as f64) as i32 + offset_y,
         );
+        let is_contact = match event.pointer_type {
+            PointerType::Touch => true,
+            PointerType::Pen => event.pressure > 0.0 || event.event_type == PointerEventType::DOWN,
+            _ => false,
+        };
+
         let mut pointer_flags = match event.event_type {
             PointerEventType::DOWN => {
                 POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN
             }
             PointerEventType::MOVE | PointerEventType::OVER | PointerEventType::ENTER => {
-                POINTER_FLAG_INRANGE | POINTER_FLAG_UPDATE
+                let mut flags = POINTER_FLAG_INRANGE | POINTER_FLAG_UPDATE;
+                if is_contact {
+                    flags |= POINTER_FLAG_INCONTACT;
+                }
+                flags
             }
             PointerEventType::UP => POINTER_FLAG_UP,
             PointerEventType::CANCEL | PointerEventType::LEAVE | PointerEventType::OUT => {
                 POINTER_FLAG_INRANGE | POINTER_FLAG_UPDATE | POINTER_FLAG_CANCELED
             }
         };
-        let button_change_type = match event.buttons {
-            Button::PRIMARY => {
-                pointer_flags |= POINTER_FLAG_INCONTACT;
-                POINTER_CHANGE_FIRSTBUTTON_DOWN
-            }
-            Button::SECONDARY => POINTER_CHANGE_SECONDBUTTON_DOWN,
-            Button::AUXILARY => POINTER_CHANGE_THIRDBUTTON_DOWN,
-            Button::NONE => POINTER_CHANGE_NONE,
+        let button_change_type = match event.event_type {
+            PointerEventType::DOWN => match event.button {
+                Button::PRIMARY => {
+                    pointer_flags |= POINTER_FLAG_INCONTACT;
+                    POINTER_CHANGE_FIRSTBUTTON_DOWN
+                }
+                Button::SECONDARY => POINTER_CHANGE_SECONDBUTTON_DOWN,
+                Button::AUXILARY => POINTER_CHANGE_THIRDBUTTON_DOWN,
+                _ => {
+                    pointer_flags |= POINTER_FLAG_INCONTACT;
+                    POINTER_CHANGE_FIRSTBUTTON_DOWN
+                }
+            },
+            PointerEventType::UP => match event.button {
+                Button::PRIMARY => POINTER_CHANGE_FIRSTBUTTON_UP,
+                Button::SECONDARY => POINTER_CHANGE_SECONDBUTTON_UP,
+                Button::AUXILARY => POINTER_CHANGE_THIRDBUTTON_UP,
+                _ => POINTER_CHANGE_FIRSTBUTTON_UP,
+            },
             _ => POINTER_CHANGE_NONE,
         };
         if event.is_primary {

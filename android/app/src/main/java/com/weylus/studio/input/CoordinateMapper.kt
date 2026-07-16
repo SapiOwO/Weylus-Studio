@@ -43,8 +43,11 @@ class CoordinateMapper {
     }
 
     fun map(x: Float, y: Float): NormalizedPoint {
-        val mappedX = ((x - marginX) / activeWidth).coerceIn(0f, 1f)
-        val mappedY = ((y - marginY) / activeHeight).coerceIn(0f, 1f)
-        return NormalizedPoint(mappedX.toDouble(), mappedY.toDouble())
+        val normX = ((x - marginX) / activeWidth).coerceIn(0f, 1f)
+        val normY = ((y - marginY) / activeHeight).coerceIn(0f, 1f)
+        return NormalizedPoint(
+            normX.toDouble(),
+            normY.toDouble()
+        )
     }
 }

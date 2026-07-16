@@ -16,5 +16,6 @@ data class ClientCapabilities(
     val hover: Boolean = true,
     val clipboard: Boolean = true,
     val pressure: Boolean = true,
+    val raw_h264: Boolean = true,
     val display: DisplayCapability? = null
 )

@@ -9,32 +9,30 @@ data class DisplayChanged(
     val rotation: Int
 )
 
+// Externally tagged wrappers to match Rust's MessageInbound enum serialization format
+
 @Serializable
-data class MessageInbound(
-    val type: String,
-    
-    // ClientConfiguration fields
-    val uinput_support: Boolean? = null,
-    val capturable_id: Int? = null,
-    val capture_cursor: Boolean? = null,
-    val max_width: Int? = null,
-    val max_height: Int? = null,
-    val client_name: String? = null,
-    val frame_rate: Double? = null,
-    val capabilities: ClientCapabilities? = null,
+data class ConfigMessage(
+    val Config: ClientConfiguration
+)
 
-    // PointerEvent fields
-    val is_primary: Boolean? = null,
-    val pointer_type: PointerType? = null,
-    val event_type: PointerEventType? = null,
-    val x: Double? = null,
-    val y: Double? = null,
-    val pressure: Float? = null,
-    val tilt_x: Float? = null,
-    val tilt_y: Float? = null,
+@Serializable
+data class PointerEventMessage(
+    val PointerEvent: PointerEvent
+)
 
-    // DisplayChanged fields
-    val width: Int? = null,
-    val height: Int? = null,
-    val rotation: Int? = null
+@Serializable
+data class DisplayChangedMessage(
+    val DisplayChanged: DisplayChanged
+)
+
+/**
+ * Sent after Config to request the server restart video delivery.
+ * Rust expects: { "ResumeVideo": null } — but since serde unit variant serializes
+ * as just the string "ResumeVideo", we use a raw string wrapper approach.
+ * This class serializes to: {"ResumeVideo": null}
+ */
+@Serializable
+data class ResumeVideoMessage(
+    val ResumeVideo: String? = null
 )

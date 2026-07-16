@@ -25,6 +25,7 @@ This unified document compiles all case studies for Weylus Studio. Each chapter 
 | **Chapter 15** | OS Decoupling & Unified Wire Protocol | 2026-07-03 | Universal `ClientConfiguration` + `ClientCapabilities` handshake, symmetric enum gating | **Resolved** ✅ |
 | **Chapter 16** | Phase 3 Android Native Client Architecture Freeze | 2026-07-08 | Decoupled Transport/Session/Decoder/Scheduler/Input layers; protocol extended with `DisplayCapability` | **Architecture Frozen** ✅ |
 | **Chapter 17** | FrameTiming Telemetry Pipeline & First APK Debug Build | 2026-07-16 | End-to-end latency measurement across receive/decode/present stages; first installable APK produced | **Implemented** ✅ |
+| **Chapter 18** | DXGI Capture Check, Raw H.264 Codec, Stylus Contact & Viewport Mapping | 2026-07-16 | Swapped BGRA colors for debug screenshot, enabled raw H.264 stream for native MediaCodecDecoder, mapped Windows stylus pointer INCONTACT pressure flags, fixed coordinate scale mapping to normalized values, optimized DXGI capture loop to 2ms | **Resolved** ✅ |
 
 ---
 
@@ -649,7 +650,7 @@ $$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} +
   **FrameTiming Data Class (`Session.kt`)**:
   - Added `FrameTiming(receiveTimestampUs, decodeTimestampUs, presentTimestampUs, frameSizeBytes)` to track the lifecycle of each frame.
   - Helper methods: `decodeLatencyMs()`, `presentLatencyMs()`, `totalLatencyMs()` compute each pipeline stage in milliseconds.
-  - `FrameTiming.log()` emits a structured `adb logcat` line tagged `FrameTiming` after each frame is presented: `FrameTiming | size=12340B | decode=3.21ms | present=1.05ms | total=4.26ms`.
+* **FrameTiming.log()**: emits a structured `adb logcat` line tagged `FrameTiming` after each frame is presented: `FrameTiming | size=12340B | decode=3.21ms | present=1.05ms | total=4.26ms`.
 
   **FrameScheduler Interface Extension (`FrameScheduler.kt`)**:
   - Added optional `onPresented: ((presentTimestampUs: Long) -> Unit)?` parameter to `onFrameAvailable()`.
@@ -665,3 +666,48 @@ $$\text{Latency}_{\text{round\_trip}} = T_{\text{capture}} + T_{\text{encode}} +
   - Output: `android/app/build/outputs/apk/debug/app-debug.apk`.
   - Installation command: `adb install android\app\build\outputs\apk\debug\app-debug.apk`.
   - Live telemetry monitoring command: `adb logcat -s FrameTiming`.
+
+---
+
+## Chapter 18: DXGI Capture Check, Raw H.264 Codec, Stylus Contact & Viewport Mapping
+* **Investigated**: 2026-07-16
+* **Resolved**: 2026-07-16
+* **Status**: ✅ **Resolved. Experimental USB application ready.**
+
+### 1. 5W+1H Diagnostic Matrix
+
+#### WHO
+* **Who is affected**: Stylus users drawing on Windows hosts using the native Android Weylus Studio app over USB ADB tunnel connection.
+
+#### WHAT
+* **What is the problem**:
+  1. **Color Swap on PC Debug Screenshot**: Cloned frame buffers from DXGI capture saved to PNG using `image::save_buffer` had swapped Red and Blue channels, making orange wallpapers look blue.
+  2. **Blank Mirroring Screen on Tablet**: Android's native `MediaCodecDecoder` was failing to decode fragmented MP4 (fMP4) streams. Handshake capability mapping failed to switch the FFmpeg format context to raw H.264 Annex B stream.
+  3. **No Drawing Stylus Contact on Windows**: Windows synthetic pointer injection failed to register stylus contact during drag actions because `POINTER_FLAG_INCONTACT` was not set during pressure moves, and button down transitions matched overall button masks which were 0.
+  4. **Stretched Viewport Touch Inaccuracy**: Tablet coordinates mapped by `CoordinateMapper` were multiplied by server width/height, placing target click positions way off-screen on the host, while the full-screen layout stretched the video causing mapping drift at the screen edges.
+  5. **Capture Frame Rate Throttling**: The screen duplication's `AcquireNextFrame` had a 50ms block timeout. When screen changes were sparse, it blocked the websocket frame timer loop, capping the overall FPS to under 20-30 FPS.
+
+#### WHERE
+* **Where does it occur**:
+  - `src/capturable/dxgi_dup.rs` (debug color mapping, frame timeout)
+  - `src/protocol.rs`, `src/websocket.rs`, `lib/encode_video.c` (raw H.264 capability negotiation and stream switching)
+  - `src/input/autopilot_device_win.rs` (pointer flags, stylus pressure contact logic)
+  - `android/app/src/main/java/com/weylus/studio/input/CoordinateMapper.kt` & `android/app/src/main/java/com/weylus/studio/ui/MirrorCanvas.kt` (touch normalization, layout aspect ratio alignment)
+
+#### WHEN
+* **When is it triggered**: Every time the client configures/connects, when the host duplicates display frames, or when the tablet dispatches stylus movements to the Windows pointer injection system.
+
+#### WHY
+* **Why did it happen**:
+  - DXGI outputs in BGRA, but the PNG exporter expected RGBA.
+  - Native Android `MediaCodec` requires raw Annex B H.264 stream NALUs (containing SPS/PPS configurations and IDR boundaries) and fails to parse or decode fMP4 container chunks.
+  - Windows `InjectSyntheticPointerInput` requires `POINTER_FLAG_INCONTACT` to trigger drawing drags, which was only set on initial down instead of active pressure moves.
+  - The Android app mapped touch inputs by multiplying coordinates by server pixels instead of keeping them normalized between `[0.0, 1.0]`. The `SurfaceView` stretched to fill screen, causing visual-to-touch mismatch.
+
+#### HOW
+* **How it was resolved**:
+  1. **Color Swap**: Swapped channels 0 and 2 in `dxgi_dup.rs` prior to saving the debug frame.
+  2. **Raw H.264**: Registered `raw_h264: bool` in `Capabilities.kt` and `protocol.rs`. Gated FFmpeg context instantiation in `encode_video.c` to use raw `"h264"` Annex B format instead of `"mp4"`.
+  3. **Stylus Contact**: Added `POINTER_FLAG_INCONTACT` during `MOVE` when pressure is > 0.0, and matched on `event.button` instead of `event.buttons` to detect active stylus tip contact.
+  4. **Touch Accuracy**: Corrected `CoordinateMapper` to return normalized values `[0.0, 1.0]`. Wrapped the video player in a Compose `Box` using `Modifier.aspectRatio` to preserve scaling, placing black bars where necessary and fixing edge coordinates.
+  5. **Pacing Optimization**: Reduced `AcquireNextFrame` blocking timeout from 50ms to 2ms, unlocking full 60Hz/120Hz V-Sync potential.

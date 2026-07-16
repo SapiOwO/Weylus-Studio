@@ -106,30 +106,16 @@ class Session(
 
     fun sendPointerEvent(event: PointerEvent) {
         if (state != SessionState.STREAMING) return
-        val msg = MessageInbound(
-            type = "PointerEvent",
-            is_primary = event.is_primary,
-            pointer_type = event.pointer_type,
-            event_type = event.event_type,
-            x = event.x,
-            y = event.y,
-            pressure = event.pressure,
-            tilt_x = event.tilt_x,
-            tilt_y = event.tilt_y
-        )
-        val text = json.encodeToString(msg)
+        val wrapped = PointerEventMessage(event)
+        val text = json.encodeToString(wrapped)
         transport.sendText(text)
     }
 
     fun sendDisplayChanged(width: Int, height: Int, rotation: Int) {
         if (state != SessionState.STREAMING) return
-        val msg = MessageInbound(
-            type = "DisplayChanged",
-            width = width,
-            height = height,
-            rotation = rotation
-        )
-        val text = json.encodeToString(msg)
+        val event = DisplayChanged(width = width, height = height, rotation = rotation)
+        val wrapped = DisplayChangedMessage(event)
+        val text = json.encodeToString(wrapped)
         transport.sendText(text)
     }
 
@@ -163,20 +149,37 @@ class Session(
     }
 
     override fun onConnected() {
+        // Move immediately to STREAMING so MirrorCanvas (and the decoder) is ready
+        // before the first video frame arrives from the server.
         updateState(SessionState.NEGOTIATING)
-        val handshake = MessageInbound(
-            type = "ClientConfiguration",
+        
+        val disp = capabilities?.display
+        val targetWidth = disp?.width ?: 1920
+        val targetHeight = disp?.height ?: 1080
+        val targetFps = disp?.refresh_rate?.toDouble() ?: 60.0
+
+        Log.i("Session", "[WEYLUS] Handshake with display capability: ${targetWidth}x${targetHeight} @ ${targetFps}Hz")
+        listener?.onVideoConfigReceived(targetWidth, targetHeight)
+
+        val handshake = ClientConfiguration(
             uinput_support = true,
             capturable_id = 0,
             capture_cursor = true,
-            max_width = 1920,
-            max_height = 1080,
+            max_width = targetWidth,
+            max_height = targetHeight,
             client_name = clientName,
-            frame_rate = 60.0,
+            frame_rate = targetFps,
             capabilities = capabilities
         )
-        val text = json.encodeToString(handshake)
-        transport.sendText(text)
+        val wrapped = ConfigMessage(handshake)
+        transport.sendText(json.encodeToString(wrapped))
+
+        // Ask server for a fresh keyframe after config is set.
+        // ResumeVideo is a Rust unit enum variant — serde serializes it as the bare string "ResumeVideo".
+        transport.sendText("\"ResumeVideo\"")
+
+        // Transition now so MirrorCanvas is mounted before the first binary frame arrives.
+        updateState(SessionState.STREAMING)
     }
 
     override fun onDisconnected(reason: String?) {
@@ -200,9 +203,12 @@ class Session(
     }
 
     override fun onBinaryMessageReceived(bytes: ByteArray) {
+        // Ensure we are in STREAMING state (redundant guard, state is set in onConnected now).
         if (state == SessionState.NEGOTIATING) {
             updateState(SessionState.STREAMING)
         }
+        if (state != SessionState.STREAMING && state != SessionState.RECOVERING) return
+
         // Record receive timestamp for this frame immediately on arrival.
         lastFrameTiming = FrameTiming(
             receiveTimestampUs = System.nanoTime() / 1_000L,

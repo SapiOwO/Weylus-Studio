@@ -73,6 +73,7 @@ typedef struct VideoContext
 	int try_nvenc;
 	int try_videotoolbox;
 	int try_mediafoundation;
+	int raw_h264;
 } VideoContext;
 
 // this is a rust function and lives in src/video.rs
@@ -487,10 +488,21 @@ void open_video(VideoContext* ctx, Error* err)
 	const AVCodec* codec;
 	int ret;
 
-	avformat_alloc_output_context2(&ctx->oc, NULL, "mp4", NULL);
-	if (!ctx->oc)
+	if (ctx->raw_h264)
 	{
-		ERROR(err, 1, "Could not find output format mp4.");
+		avformat_alloc_output_context2(&ctx->oc, NULL, "h264", NULL);
+		if (!ctx->oc)
+		{
+			ERROR(err, 1, "Could not find output format h264.");
+		}
+	}
+	else
+	{
+		avformat_alloc_output_context2(&ctx->oc, NULL, "mp4", NULL);
+		if (!ctx->oc)
+		{
+			ERROR(err, 1, "Could not find output format mp4.");
+		}
 	}
 
 	int using_hw = 0;
@@ -793,8 +805,10 @@ void open_video(VideoContext* ctx, Error* err)
 
 	AVDictionary* opt = NULL;
 
-	// enable writing fragmented mp4
-	av_dict_set(&opt, "movflags", "frag_custom+empty_moov+default_base_moof", 0);
+	if (!ctx->raw_h264) {
+		// enable writing fragmented mp4
+		av_dict_set(&opt, "movflags", "frag_custom+empty_moov+default_base_moof", 0);
+	}
 	ret = avformat_write_header(ctx->oc, &opt);
 	if (ret < 0)
 		log_warn("Video: failed to write header!");
@@ -882,7 +896,8 @@ VideoContext* init_video_encoder(
 	int try_vaapi,
 	int try_nvenc,
 	int try_videotoolbox,
-	int try_mediafoundation)
+	int try_mediafoundation,
+	int raw_h264)
 {
 	VideoContext* ctx = malloc(sizeof(VideoContext));
 	ctx->rust_ctx = rust_ctx;
@@ -898,6 +913,7 @@ VideoContext* init_video_encoder(
 	ctx->try_videotoolbox = try_videotoolbox;
 	ctx->try_mediafoundation = try_mediafoundation;
 	ctx->hw_device_ctx = NULL;
+	ctx->raw_h264 = raw_h264;
 
 	// make sure all scalers are zero initialized so that destroy can always be called
 	memset(&ctx->scalers, 0, sizeof(Scalers));
