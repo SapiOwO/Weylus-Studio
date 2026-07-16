@@ -271,3 +271,28 @@ The Android client serializes all messages using `kotlinx.serialization` to matc
 
 > [!IMPORTANT]
 > Any rename of a field in `src/protocol.rs` **must** be simultaneously reflected in the Kotlin `@SerialName` annotations in the Android client. A protocol drift will silently corrupt input injection on the server side.
+
+### Telemetry & Latency Observability (FrameTiming)
+
+To guarantee a low-latency, stutter-free 120Hz drawing experience, a passive telemetry pipeline measures end-to-end delay at each stage of the frame rendering path.
+
+```text
+Host PC           WebSocket (TCP)           MediaCodec.dequeue       V-Sync (Choreographer)
+  [Capture] ──> [onBinaryMessageReceived] ──> [onFrameDecoded] ──> [onFramePresented]
+                         │                           │                       │
+                         ▼                           ▼                       ▼
+                  receiveTimestampUs          decodeTimestampUs       presentTimestampUs
+```
+
+1. **receiveTimestampUs**: Captured immediately on the network thread when a binary frame payload is delivered to `Session.onBinaryMessageReceived()`. Uses monotonic microsecond clock (`System.nanoTime() / 1000L`).
+2. **decodeTimestampUs**: Captured by `MediaCodecDecoder` when `dequeueOutputBuffer` successfully returns a completed frame index, before delegating the presentation to the frame scheduler.
+3. **presentTimestampUs**: Captured by `ChoreographerFrameScheduler` immediately after the release action (which commits the decoded buffer to the display surface) is executed on the next V-Sync boundary.
+
+**Latency Metrics**:
+* **Decode Latency**: `decodeTimestampUs - receiveTimestampUs` (Measures decoder queue delay & hardware time).
+* **Present Latency**: `presentTimestampUs - decodeTimestampUs` (Measures V-Sync alignment wait time inside the scheduler).
+* **Total Client Latency**: `presentTimestampUs - receiveTimestampUs` (Total delay added by the Android client package).
+
+Every frame metrics summary is logged to Android system log under the tag `FrameTiming`:
+`FrameTiming | size=14820B | decode=3.10ms | present=1.20ms | total=4.30ms`
+
