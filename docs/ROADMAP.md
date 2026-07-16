@@ -85,13 +85,14 @@ This document outlines the engineering phase plan for evolving Weylus Studio fro
 - [x] **FrameScheduler (Choreographer-backed)**: Decouples `MediaCodec` buffer management from V-Sync paced frame presentation.
 - [x] **Protocol Extensions**: `DisplayCapability` (handshake) and `DisplayChanged` (runtime orientation) added to `src/protocol.rs`.
 
-#### Implementation Phase (Next 🚧)
-- [ ] **MediaCodec Hardware Decoding**: Decode H.264 streams directly into `SurfaceView` using Android `MediaCodec` hardware decoder.
-- [ ] **MirrorCanvas Compose Surface**: Render decoded frames via Jetpack Compose `Canvas` with `CoordinateMapper` integration.
-- [ ] **Native MotionEvent Handler**: Forward `pressure`, `orientation`, `tiltX`, `tiltY`, and hover events from `MotionEvent` directly to the `Session` WebSocket pipe.
-- [ ] **ConnectScreen UI**: Compose-based server discovery UI supporting manual IP entry and mDNS auto-discovery.
-- [ ] **Samsung S Pen SDK Integration**: Calibrate S Pen-specific hover and Air Action signals via Samsung Pen SDK.
-- [ ] **APK Build & Distribution**: Configure Gradle release signing, minification, and produce a distributable debug APK.
+#### Implementation Phase (Completed/Active 🚧)
+- [x] **MediaCodec Hardware Decoding**: Decode H.264 streams directly into `SurfaceView` using Android `MediaCodec` hardware decoder with `KEY_LOW_LATENCY` enabled.
+- [x] **MirrorCanvas Compose Surface**: Render decoded frames via Jetpack Compose `AndroidView` wrapping a `SurfaceView` with `CoordinateMapper` integration.
+- [x] **Native MotionEvent Handler**: Forward `pressure`, `tiltX`, `tiltY` (via `AXIS_TILT`), and hover events from `MotionEvent` directly to the `Session` WebSocket pipe.
+- [x] **ConnectScreen UI**: Compose-based UI supporting manual IP/port entry and connection state mapping.
+- [x] **APK Build & Distribution**: Configured Gradle (Gradle 8.7 wrapper, local.properties) and produced a successful debug APK.
+- [ ] **Samsung S Pen SDK Integration**: Calibrate S Pen-specific hover and Air Action signals via Samsung Pen SDK (Optional/Future).
+- [ ] **Phase B Telemetry Verification & Tuning**: Perform end-to-end telemetry testing with a physical device and tune host-side NVENC/MediaFoundation low-latency encoders.
 
 ### Phase 4 — Virtual Display & Second Screen (Future 🚀)
 * **Goal**: Leverage Windows Indirect Display Driver (IddCx) to create a virtual monitor, streaming the workspace exclusively to the tablet for a complete dual-display drawing experience.
